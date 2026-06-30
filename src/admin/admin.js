@@ -62,6 +62,8 @@ async function load() {
 }
 
 /* ── Render ── */
+let _eventsAttached = false
+
 function render() {
   const tenant = currentTenant()
   if (!can(adminState.adminModule, state.role)) adminState.adminModule = 'dashboard'
@@ -108,7 +110,10 @@ function render() {
     </div>
     ${renderModal()}`
 
-  attachEvents()
+  if (!_eventsAttached) {
+    attachEvents()
+    _eventsAttached = true
+  }
 }
 
 function pageContent() {
@@ -832,9 +837,8 @@ function renderModal() {
     const hasPrev = idx > 0
     const hasNext = idx < filtered.length - 1
     return `
-      <div class="modal-backdrop" style="cursor:default">
-        <div class="modal" style="max-width:600px;max-height:90vh;overflow-y:auto"
-          onclick="event.stopPropagation()">
+      <div class="modal-backdrop" data-no-backdrop-close>
+        <div class="modal" style="max-width:600px;max-height:90vh;overflow-y:auto">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
             <h2 style="margin:0">INV-${s.id}</h2>
             <button class="icon-button" data-close style="font-size:20px;line-height:1">×</button>
@@ -932,6 +936,12 @@ function attachEvents() {
 
   // Click delegation
   app.addEventListener('click', async e => {
+    // Backdrop click — close modal only if backdrop itself was clicked
+    // and it's not flagged as "no backdrop close" (e.g. receipt modal)
+    if (e.target.classList.contains('modal-backdrop') && !e.target.hasAttribute('data-no-backdrop-close')) {
+      state.modal = null; render(); return
+    }
+
     const el = e.target.closest(
       'button,[data-modal],[data-close],[data-action],[data-comp],[data-remove-comp],' +
       '[data-settings-tab],[data-kpi-target],[data-pp-key],[data-te-remove],' +
@@ -946,7 +956,12 @@ function attachEvents() {
     if (el.dataset.kpiTarget) {
       const target = el.dataset.kpiTarget
       if (target === 'udharList') { state.modal = { type:'udharList' }; render(); return }
-      if (ADMIN_MODULES.find(([k]) => k === target)) { adminState.adminModule = target; adminState.filter = ''; render(); return }
+      if (ADMIN_MODULES.find(([k]) => k === target)) {
+        adminState.filter = ''
+        const { navigate } = await import('../router.js')
+        navigate(`/admin/${target}`)
+        return
+      }
       return
     }
 
@@ -954,12 +969,12 @@ function attachEvents() {
     if (el.dataset.modal) { state.modal = { type:el.dataset.modal, id:el.dataset.id }; render(); return }
 
     if (el.dataset.action === 'go-pos') {
-      const { initPOS } = await import('../pos/pos.js')
-      initPOS(SESSION); return
+      const { navigate } = await import('../router.js')
+      navigate('/pos'); return
     }
     if (el.dataset.action === 'go-workshop') {
-      const { initWorkshop } = await import('../pos/workshop.js')
-      initWorkshop(SESSION); return
+      const { navigate } = await import('../router.js')
+      navigate('/workshop'); return
     }
 
     if (el.dataset.action === 'theme') {
@@ -970,6 +985,8 @@ function attachEvents() {
     if (el.dataset.action === 'logout') {
       if (!confirm('Log out?')) return
       _clearSession()
+      const { navigate } = await import('../router.js')
+      navigate('/login', { force: true })
       renderLogin(onLoginSuccess); return
     }
 
@@ -1008,8 +1025,8 @@ function attachEvents() {
       const found = state.data.tickets.find(t => String(t.id) === String(el.dataset.ticketId))
       if (!found) return
       sessionStorage.setItem('retailos_collect_ticket', String(found.id))
-      const { initPOS } = await import('../pos/pos.js')
-      initPOS(SESSION); return
+      const { navigate } = await import('../router.js')
+      navigate('/pos'); return
     }
 
     if (el.dataset.action === 'te-add-comp') {
@@ -1224,7 +1241,12 @@ function attachEvents() {
   // Change
   app.addEventListener('change', async e => {
     const t = e.target
-    if (t.dataset.action === 'admin-module') { adminState.adminModule = t.value; adminState.filter = ''; render(); return }
+    if (t.dataset.action === 'admin-module') {
+      adminState.filter = ''
+      const { navigate } = await import('../router.js')
+      navigate(`/admin/${t.value}`)
+      return
+    }
     if (t.dataset.compTag !== undefined) {
       const sel = state.modal?.selectedComponents || []
       const idx = Number(t.dataset.compTag)
@@ -1366,9 +1388,10 @@ async function verifyAdminLocal(pin) {
 }
 
 /* ── Public ── */
-export async function initAdmin(sess) {
+export async function initAdmin(sess, module, query) {
   SESSION = sess
   state.role = sess.isAdmin ? 'Business Owner' : (sess.employee?.role || 'Manager')
+  if (module) adminState.adminModule = module
   await load()
 }
 
