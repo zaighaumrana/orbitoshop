@@ -1,5 +1,6 @@
 import { loadConfig, applyBranding, _loadSession, state, CFG } from './shared.js'
 import { renderLogin } from './auth.js'
+import { registerRoute, registerNotFound, startRouter, navigate } from './router.js'
 
 async function boot() {
   await loadConfig()
@@ -21,27 +22,59 @@ async function boot() {
   const SESSION = _loadSession()
 
   if (!SESSION.employee) {
+    registerNotFound(() => renderLogin(onLoginSuccess))
     renderLogin(onLoginSuccess)
     return
   }
 
-  onLoginSuccess(SESSION)
+  setupRoutes(SESSION)
+  startRouter()
+}
+
+function setupRoutes(SESSION) {
+  registerRoute('/login', () => renderLogin(onLoginSuccess))
+
+  registerRoute('/pos', async () => {
+    const { initPOS } = await import('./pos/pos.js')
+    initPOS(SESSION)
+  })
+
+  registerRoute('/workshop', async () => {
+    const { initWorkshop } = await import('./pos/workshop.js')
+    initWorkshop(SESSION)
+  })
+
+  const adminModules = ['dashboard','repairs','inventory','reports','employees','receipts','settings']
+  adminModules.forEach(mod => {
+    registerRoute(`/admin/${mod}`, async (params, query) => {
+      const { initAdmin } = await import('./admin/admin.js')
+      initAdmin(SESSION, mod, query)
+    })
+  })
+
+  registerRoute('/admin', async () => {
+    navigate('/admin/dashboard', { replace: true })
+  })
+
+  registerNotFound(() => {
+    const role = SESSION.isAdmin ? 'Business Owner' : (SESSION.employee?.role || '')
+    if (role === 'Business Owner' || role === 'Manager') navigate('/admin/dashboard', { replace: true })
+    else if (role === 'Technician') navigate('/workshop', { replace: true })
+    else navigate('/pos', { replace: true })
+  })
 }
 
 async function onLoginSuccess(SESSION) {
   const role = SESSION.isAdmin ? 'Business Owner' : (SESSION.employee?.role || '')
   state.role = role
 
-  if (role === 'Business Owner' || role === 'Manager') {
-    const { initAdmin } = await import('./admin/admin.js')
-    initAdmin(SESSION)
-  } else if (role === 'Technician') {
-    const { initWorkshop } = await import('./pos/workshop.js')
-    initWorkshop(SESSION)
-  } else {
-    const { initPOS } = await import('./pos/pos.js')
-    initPOS(SESSION)
-  }
+  setupRoutes(SESSION)
+
+  if (role === 'Business Owner' || role === 'Manager') navigate('/admin/dashboard')
+  else if (role === 'Technician') navigate('/workshop')
+  else navigate('/pos')
+
+  startRouter()
 }
 
 window.addEventListener('online',  () => { state.online = true })
