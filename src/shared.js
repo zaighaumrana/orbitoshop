@@ -218,6 +218,22 @@ export let ppBuffer   = ''
 export let ppPurpose  = ''
 export let ppCallback = null
 
+/**
+ * Open a PIN prompt for a sensitive/destructive action.
+ *
+ * Standard pattern for all protected actions:
+ *
+ *   openPinPrompt('admin', async (verified) => {
+ *     if (!verified) return          // ← always guard first
+ *     await doDestructiveThing()
+ *   }, render)
+ *
+ * The callback receives `true` only when PIN verification succeeds.
+ * It is never called on failure — but the guard makes intent explicit
+ * and prevents future bugs if the flow changes.
+ *
+ * Use this pattern for: delete, deactivate, refund, discount, settle.
+ */
 export function openPinPrompt(purpose, callback, renderFn) {
   ppBuffer   = ''
   ppPurpose  = purpose
@@ -264,8 +280,12 @@ export async function handlePpKey(key, verifyFn, renderFn) {
 async function _submitPp(verifyFn, renderFn) {
   const pin = ppBuffer; ppBuffer = ''
   const res = await verifyFn(pin)
-  if (res.ok) { state.modal = null; ppCallback && ppCallback() }
-  else {
+  if (res.ok) {
+    state.modal = null
+    // Pass verified=true explicitly — callback must check this
+    if (ppCallback) await ppCallback(true)
+  } else {
+    // Never call ppCallback on failure
     const errEl   = document.getElementById('pp-error')
     const display = document.getElementById('pp-display')
     if (errEl)   errEl.classList.remove('hidden')

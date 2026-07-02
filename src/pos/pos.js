@@ -1005,7 +1005,10 @@ function attachEvents() {
     if (el.dataset.action === 'checkout') {
       const hasDiscount = posState.cart.some(i => i.discount > 0)
       if (hasDiscount && CFG.discount_pin_required) {
-        openPinPrompt('discount', () => doCheckout(), render); return
+        openPinPrompt('discount', async (verified) => {
+        if (!verified) return
+        await doCheckout()
+      }, render); return
       }
       await doCheckout(); return
     }
@@ -1127,7 +1130,10 @@ function attachEvents() {
       const amount  = Number(document.querySelector(`[data-settle-amount="${udharId}"]`)?.value)
       const method  = document.querySelector(`[data-settle-method="${udharId}"]`)?.value||'Cash'
       if (!amount||amount<=0) { alert('Enter a valid amount.'); return }
-      openPinPrompt('settle', async () => settleUdhar(udharId, amount, method), render); return
+      openPinPrompt('settle', async (verified) => {
+        if (!verified) return
+        await settleUdhar(udharId, amount, method)
+      }, render); return
     }
   })
 
@@ -1239,7 +1245,8 @@ function attachEvents() {
       const items    = sale?.items_sold||[]
       const returned = items.filter((_,i)=>data[`ret_${i}`]!==undefined)
       const refund   = returned.reduce((s,it)=>s+(it.sold_price||it.soldPrice||0)*it.qty,0)
-      openPinPrompt('return', async () => {
+      openPinPrompt('return', async (verified) => {
+        if (!verified) return
         const { error } = await sb.from('returns').insert({
           original_sale_id:saleId, returned_items:returned,
           refund_amount:refund, processed_by:SESSION.employee?.id||null, notes:data.notes||''

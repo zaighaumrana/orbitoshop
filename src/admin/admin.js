@@ -356,9 +356,17 @@ function employees() {
                   data-emp-id="${e.id}" data-emp-name="${e.name}"
                   data-emp-role="${e.role}" data-emp-status="${e.status}"
                   data-emp-email="${e.email||''}">Edit</button>
-                <button class="secondary-button" style="font-size:12px;color:var(--danger)"
-                  data-action="remove-employee"
-                  data-emp-id="${e.id}" data-emp-name="${e.name}">Remove</button>
+                ${state.role === 'Business Owner' || SESSION.isAdmin ? `
+                  <button class="secondary-button" style="font-size:12px;color:var(--danger)"
+                    data-action="remove-employee"
+                    data-emp-id="${e.id}" data-emp-name="${e.name}"
+                    data-emp-can-delete="true">Remove</button>
+                ` : `
+                  <button class="secondary-button" style="font-size:12px;color:var(--warning)"
+                    data-action="remove-employee"
+                    data-emp-id="${e.id}" data-emp-name="${e.name}"
+                    data-emp-can-delete="false">Deactivate</button>
+                `}
               </td>
             </tr>`).join('')}
           </tbody>
@@ -528,50 +536,40 @@ function settingsTabContent() {
       </div>`
   }
   if (adminState.settingsTab === 'staff') {
-    const emps = state.data.employees || []
     return `
       <div style="display:grid;gap:16px">
         <div class="card" style="display:grid;gap:14px">
-          <h2>Employees</h2>
-          ${emps.length ? `
-            <div class="table-wrap"><table>
-              <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th></th></tr></thead>
-              <tbody>
-                ${emps.map(e => `<tr>
-                  <td><strong>${e.name}</strong></td>
-                  <td class="muted" style="font-size:12px">${e.email||'—'}</td>
-                  <td>${e.role}</td>
-                  <td><span class="badge ${e.status==='Active'?'good':'bad'}">${e.status}</span></td>
-                  <td style="display:flex;gap:6px">
-                    <button class="secondary-button" style="font-size:12px"
-                      data-action="edit-employee"
-                      data-emp-id="${e.id}" data-emp-name="${e.name}"
-                      data-emp-role="${e.role}" data-emp-status="${e.status}"
-                      data-emp-email="${e.email||''}">Edit</button>
-                    <button class="secondary-button" style="font-size:12px;color:var(--danger)"
-                      data-action="remove-employee"
-                      data-emp-id="${e.id}" data-emp-name="${e.name}">Remove</button>
-                  </td>
-                </tr>`).join('')}
-              </tbody>
-            </table></div>` : `<p class="muted">No employees yet.</p>`}
-          <button class="primary-button" style="width:fit-content" data-modal="employee">+ Add Employee</button>
-        </div>
-        <div class="card" style="display:grid;gap:14px">
           <h2>Owner Login</h2>
+          <p class="muted" style="font-size:13px">
+            Email and password used by the shop owner to sign in.
+          </p>
           <form class="form-grid" data-form="owner-login">
             ${fld('Owner Email','owner_email',CFG.owner_email||'','email')}
             ${fld('New Password (blank = keep)','owner_password','','password')}
-            <div class="modal-actions" style="grid-column:1/-1"><button class="primary-button">Save Owner Login</button></div>
+            <div class="modal-actions" style="grid-column:1/-1">
+              <button class="primary-button">Save Owner Login</button>
+            </div>
           </form>
         </div>
         <div class="card" style="display:grid;gap:14px">
           <h2>Override PIN</h2>
-          <p class="muted" style="font-size:13px">4-digit PIN for discounts and returns at POS.</p>
+          <p class="muted" style="font-size:13px">
+            4-digit PIN required for discounts, returns, and other sensitive actions at POS.
+            This is not a login PIN — it is an authorization PIN for protected operations.
+          </p>
           <form class="form-grid" data-form="override-pin">
             ${fld('New Override PIN','override_pin','','password')}
-            <div class="modal-actions" style="grid-column:1/-1"><button class="primary-button">Save PIN</button></div>
+            <div class="modal-actions" style="grid-column:1/-1">
+              <button class="primary-button">Save PIN</button>
+            </div>
           </form>
+        </div>
+        <div class="card" style="padding:14px">
+          <p class="muted" style="font-size:13px">
+            To manage employees, go to the
+            <button type="button" class="secondary-button" style="font-size:12px;padding:3px 10px;margin:0 4px"
+              data-action="go-employees-tab">Employees tab</button>
+          </p>
         </div>
       </div>`
   }
@@ -990,6 +988,13 @@ function attachEvents() {
       renderLogin(onLoginSuccess); return
     }
 
+    if (el.dataset.action === 'go-employees-tab') {
+      adminState.adminModule = 'employees'
+      adminState.settingsTab = 'branding'
+      const { navigate } = await import('../router.js')
+      navigate('/admin/employees'); return
+    }
+
     if (el.dataset.action === 'edit-employee') {
       state.modal = { type:'employee', editMode:true,
         id:el.dataset.empId, name:el.dataset.empName,
@@ -998,16 +1003,46 @@ function attachEvents() {
     }
 
     if (el.dataset.action === 'remove-employee') {
-      const name = el.dataset.empName || 'this employee'
-      const empId = el.dataset.empId
-      openPinPrompt('admin', async () => {
-        const { error } = await sb.from('employees').delete().eq('id', empId)
-        if (error) {
-          if (error.message.includes('foreign key') || error.message.includes('violates')) {
-            await sb.from('employees').update({ status:'Inactive' }).eq('id', empId)
-            alert(`${name} has transaction history. Set to Inactive instead.`)
-          } else { alert('Error: ' + error.message); return }
+      const name      = el.dataset.empName || 'this employee'
+      const empId     = el.dataset.empId
+      const canDelete = el.dataset.empCanDelete === 'true'
+
+      // Determine action before opening PIN prompt
+      let chosenAction = 'deactivate'  // default for Managers
+      if (canDelete) {
+        const choice = confirm(
+          `What would you like to do with ${name}?\n\n` +
+          `OK = Permanently Delete\n` +
+          `Cancel = Make Inactive only`
+        )
+        chosenAction = choice ? 'delete' : 'deactivate'
+      }
+
+      openPinPrompt('admin', async (verified) => {
+        // Security guard — only proceed if PIN was actually verified
+        if (!verified) return
+
+        if (chosenAction === 'delete') {
+          const { error } = await sb.from('employees').delete().eq('id', empId)
+          if (error) {
+            if (error.message.includes('foreign key') || error.message.includes('violates')) {
+              // Has transaction history — fall back to deactivate
+              const { error: deactErr } = await sb.from('employees')
+                .update({ status: 'Inactive' }).eq('id', empId)
+              if (deactErr) { alert('Error: ' + deactErr.message); return }
+              alert(`${name} has transaction history and cannot be permanently deleted.\nSet to Inactive instead.`)
+            } else {
+              alert('Error deleting employee: ' + error.message); return
+            }
+          }
+        } else {
+          // Deactivate only
+          const { error } = await sb.from('employees')
+            .update({ status: 'Inactive' }).eq('id', empId)
+          if (error) { alert('Error deactivating: ' + error.message); return }
         }
+
+        // Clear active sessions regardless of action
         await sb.from('active_sessions').delete().eq('employee_id', String(empId))
         await load()
       }, render); return
