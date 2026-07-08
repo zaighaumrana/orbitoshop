@@ -8,7 +8,6 @@ import {
   logBillEvent, logInventoryEvent,
 } from '../shared.js'
 
-import { renderLogin } from '../auth.js'
 
 const ADMIN_MODULES = [
   ['dashboard', '▦', 'Dashboard'],
@@ -17,6 +16,7 @@ const ADMIN_MODULES = [
   ['reports',   '▧', 'Reports'],
   ['employees', '♙', 'Employees'],
   ['receipts',  '◉', 'Receipts'],
+  ['ems',       '⏱', 'EMS'],
   ['settings',  '◐', 'Settings'],
 ]
 
@@ -41,23 +41,45 @@ async function load() {
     ? sb.from('inventory').select('*').order('name')
     : Promise.resolve({ data: [] })
 
-  const [tickets, sales, employees, udhar, returns_, inv] = await Promise.all([
+  const [tickets, sales, employees, udhar, returns_, inv, quickItems, repairComponents] = await Promise.all([
     sb.from('tickets').select('*').order('id', { ascending: false }),
     sb.from('sales').select('*').order('id', { ascending: false }),
     sb.from('employees').select('id, name, role, status, email').order('name'),
     sb.from('udhar').select('*').order('id', { ascending: false }),
     sb.from('returns').select('*').order('id', { ascending: false }),
     fetchInv,
+    sb.from('quick_items').select('*').order('sort_order'),
+    sb.from('repair_components').select('*').order('sort_order'),
   ])
   state.data = {
-    tickets:   tickets.data   || [],
-    sales:     sales.data     || [],
-    employees: employees.data || [],
-    udhar:     udhar.data     || [],
-    returns:   returns_.data  || [],
-    inventory: inv.data       || [],
+    tickets:          tickets.data          || [],
+    sales:            sales.data            || [],
+    employees:        employees.data        || [],
+    udhar:            udhar.data            || [],
+    returns:          returns_.data         || [],
+    inventory:        inv.data              || [],
+    quickItems:       quickItems.data       || [],
+    repairComponents: repairComponents.data || [],
   }
   applyBranding()
+
+  if (adminState.adminModule === 'ems') {
+    const { loadEMSData, emsView, attachEMSEvents, resetEMSEvents } = await import('./ems.js')
+    const emsData = await loadEMSData()
+    adminState._emsData = emsData
+    adminState._emsHTML = emsView(emsData, SESSION)
+    render()
+    const app = document.getElementById('app')
+    resetEMSEvents()
+    attachEMSEvents(app, () => adminState._emsData, async () => {
+      const fresh = await loadEMSData()
+      adminState._emsData = fresh
+      adminState._emsHTML = emsView(fresh, SESSION)
+      render()
+    }, SESSION)
+    return
+  }
+
   render()
 }
 
@@ -118,6 +140,9 @@ function render() {
 
 function pageContent() {
   const pages = { dashboard, repairs, inventory, reports, employees, receipts, settings }
+  if (adminState.adminModule === 'ems') {
+    return adminShell(adminState._emsHTML || '<div class="empty">Loading EMS…</div>')
+  }
   return adminShell((pages[adminState.adminModule] || dashboard)())
 }
 
@@ -460,7 +485,32 @@ function settings() {
 
 function settingsTabContent() {
   const t = currentTenant()
-  if (adminState.settingsTab === 'branding') return `
+
+  const platformFlags = `
+    <div class="card" style="display:grid;gap:10px;padding:14px 16px;margin-bottom:4px">
+      <p style="font-size:12px;font-weight:600;color:var(--muted);
+                text-transform:uppercase;letter-spacing:.5px">
+        Plan Features — Managed by RetailOS Platform
+      </p>
+      <div style="display:grid;gap:8px">
+        ${[
+          ['Repair Module',     CFG.repair_module_enabled],
+          ['Inventory Module',  CFG.inventory_module_enabled],
+          ['Technician Module', CFG.technician_module_enabled],
+          ['Live Tracking',     CFG.live_tracking_enabled],
+          ['EMS',               CFG.ems_enabled],
+          ['Break Tracking',    CFG.ems_track_breaks],
+        ].map(([label, enabled]) => `
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:13px">${label}</span>
+            <span class="badge ${enabled ? 'good' : 'bad'}">
+              ${enabled ? 'Enabled' : 'Not enabled'}
+            </span>
+          </div>`).join('')}
+      </div>
+    </div>`
+
+  if (adminState.settingsTab === 'branding') return platformFlags + `
     <form class="card form-grid" data-form="settings">
       ${fld('Business Name','name',t.name)}
       ${fld('Description','businessDescription',CFG.shop_description||'')}
@@ -469,6 +519,7 @@ function settingsTabContent() {
       <label class="field"><span>Logo Upload</span><input name="logo" type="file" accept="image/*"></label>
       <div class="modal-actions" style="grid-column:1/-1"><button class="primary-button">Save Branding</button></div>
     </form>`
+
   if (adminState.settingsTab === 'contact') return `
     <form class="card form-grid" data-form="settings">
       ${fld('Business Name','name',t.name)}
@@ -477,6 +528,7 @@ function settingsTabContent() {
       ${fld('Email','email',CFG.shop_email||'')}
       <div class="modal-actions" style="grid-column:1/-1"><button class="primary-button">Save Contact Info</button></div>
     </form>`
+
   if (adminState.settingsTab === 'receipt') return `
     <form class="card form-grid" data-form="settings">
       ${fld('Currency Symbol','currency',t.currency)}
@@ -485,27 +537,31 @@ function settingsTabContent() {
         <textarea name="receiptFooter">${t.receiptFooter}</textarea></label>
       <div class="modal-actions" style="grid-column:1/-1"><button class="primary-button">Save Receipt Settings</button></div>
     </form>`
+
   if (adminState.settingsTab === 'components') {
-    const comps = CFG.quick_components || []
+    const comps = state.data.repairComponents || []
     return `
       <div class="card" style="display:grid;gap:14px">
         <div><h2>Quick-Tap Components</h2></div>
         <div style="display:flex;flex-wrap:wrap;gap:8px">
-          ${comps.map((c,i) => `
-            <div style="display:flex;align-items:center;gap:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:6px 10px">
-              <span style="font-size:13px">${c}</span>
-              <button type="button" data-remove-quick="${i}" style="color:var(--danger);background:none;border:none;font-size:16px;line-height:1;padding:0 2px;cursor:pointer">×</button>
+          ${comps.map((c) => `
+            <div style="display:flex;align-items:center;gap:6px;background:var(--surface-2);
+                        border:1px solid var(--border);border-radius:8px;padding:6px 10px">
+              <span style="font-size:13px">${c.name}</span>
+              <button type="button" data-remove-quick="${c.id}"
+                style="color:var(--danger);background:none;border:none;
+                       font-size:16px;line-height:1;padding:0 2px;cursor:pointer">×</button>
             </div>`).join('')}
         </div>
         <div style="display:flex;gap:8px">
           <input id="new-comp-input" class="search" placeholder="New component name" style="flex:1">
           <button class="primary-button" data-action="add-quick-comp">Add</button>
         </div>
-        <button class="primary-button" data-action="save-quick-comps">Save Components</button>
       </div>`
   }
+
   if (adminState.settingsTab === 'quickitems') {
-    const items = CFG.quick_items || []
+    const items = state.data.quickItems || []
     return `
       <div class="card" style="display:grid;gap:16px">
         <div><h2>Quick Sale Items</h2></div>
@@ -513,18 +569,21 @@ function settingsTabContent() {
           <div style="padding:12px;background:var(--surface-2);border-radius:8px;display:grid;gap:8px">
             <div style="display:flex;justify-content:space-between;align-items:center">
               <strong>${item.name}</strong>
-              <button type="button" data-remove-qitem="${i}" style="color:var(--danger);background:none;border:none;font-size:18px;cursor:pointer">×</button>
+              <button type="button" data-remove-qitem="${i}"
+                style="color:var(--danger);background:none;border:none;font-size:18px;cursor:pointer">×</button>
             </div>
             <div style="font-size:13px;color:var(--muted)">
-              Prices: ${item.prices.map((p,pi) => `
+              Prices: ${(item.prices||[]).map((p,pi) => `
                 <span style="display:inline-flex;align-items:center;gap:4px;margin-right:6px">
                   ${money(p)}
-                  <button type="button" data-remove-qprice="${i}-${pi}" style="color:var(--danger);background:none;border:none;font-size:14px;cursor:pointer;padding:0">×</button>
+                  <button type="button" data-remove-qprice="${i}-${pi}"
+                    style="color:var(--danger);background:none;border:none;font-size:14px;cursor:pointer;padding:0">×</button>
                 </span>`).join('')}
             </div>
             <div style="display:flex;gap:8px">
               <input type="number" step="any" min="0" placeholder="Add price" id="qprice-input-${i}"
-                style="flex:1;border:1px solid var(--border);border-radius:6px;padding:7px 9px;background:var(--surface);color:var(--text)">
+                style="flex:1;border:1px solid var(--border);border-radius:6px;
+                       padding:7px 9px;background:var(--surface);color:var(--text)">
               <button type="button" class="secondary-button" data-add-qprice="${i}">+ Price</button>
             </div>
           </div>`).join('')}
@@ -532,17 +591,15 @@ function settingsTabContent() {
           <input id="qitem-name" class="search" placeholder="Item name" style="flex:1">
           <button class="primary-button" data-action="add-qitem">Add Item</button>
         </div>
-        <button class="primary-button" data-action="save-qitems">Save Quick Items</button>
       </div>`
   }
+
   if (adminState.settingsTab === 'staff') {
     return `
       <div style="display:grid;gap:16px">
         <div class="card" style="display:grid;gap:14px">
           <h2>Owner Login</h2>
-          <p class="muted" style="font-size:13px">
-            Email and password used by the shop owner to sign in.
-          </p>
+          <p class="muted" style="font-size:13px">Email and password used by the shop owner to sign in.</p>
           <form class="form-grid" data-form="owner-login">
             ${fld('Owner Email','owner_email',CFG.owner_email||'','email')}
             ${fld('New Password (blank = keep)','owner_password','','password')}
@@ -554,8 +611,8 @@ function settingsTabContent() {
         <div class="card" style="display:grid;gap:14px">
           <h2>Override PIN</h2>
           <p class="muted" style="font-size:13px">
-            4-digit PIN required for discounts, returns, and other sensitive actions at POS.
-            This is not a login PIN — it is an authorization PIN for protected operations.
+            4-digit PIN for discounts, returns, and sensitive actions at POS.
+            Not a login PIN — an authorization PIN for protected operations.
           </p>
           <form class="form-grid" data-form="override-pin">
             ${fld('New Override PIN','override_pin','','password')}
@@ -567,12 +624,14 @@ function settingsTabContent() {
         <div class="card" style="padding:14px">
           <p class="muted" style="font-size:13px">
             To manage employees, go to the
-            <button type="button" class="secondary-button" style="font-size:12px;padding:3px 10px;margin:0 4px"
+            <button type="button" class="secondary-button"
+              style="font-size:12px;padding:3px 10px;margin:0 4px"
               data-action="go-employees-tab">Employees tab</button>
           </p>
         </div>
       </div>`
   }
+
   return ''
 }
 
@@ -710,7 +769,7 @@ function renderModal() {
   }
 
   if (type === 'repair') {
-    const comps = CFG.quick_components || []
+    const comps = (state.data.repairComponents || []).map(c => c.name)
     const sel   = state.modal?.selectedComponents || []
     const d     = state.modal?._draft || {}
     const fldV  = (label,name,val='',t='text') =>
@@ -1167,40 +1226,65 @@ function attachEvents() {
 
     if (el.dataset.action === 'add-quick-comp') {
       const val = document.getElementById('new-comp-input')?.value?.trim(); if (!val) return
-      CFG.quick_components = [...(CFG.quick_components||[]), val]; render(); return
+      const { error } = await sb.from('repair_components').insert({
+        name: val, sort_order: (state.data.repairComponents||[]).length + 1
+      })
+      if (error) { alert('Error: '+error.message); return }
+      const input = document.getElementById('new-comp-input')
+      if (input) input.value = ''
+      await load(); return
     }
     if (el.dataset.action === 'save-quick-comps') {
-      const { error } = await sb.from('shop_config').update({ quick_components:CFG.quick_components }).eq('id',1)
-      if (error) { alert('Save failed: '+error.message); return }
-      alert('Components saved.'); await load(); return
+      // No longer needed — adds/removes go directly to DB
+      await load(); return
     }
     if (el.dataset.removeQuick !== undefined) {
-      const comps = [...(CFG.quick_components||[])]
-      comps.splice(Number(el.dataset.removeQuick), 1); CFG.quick_components = comps; render(); return
+      const compId = Number(el.dataset.removeQuick)
+      const { error } = await sb.from('repair_components').delete().eq('id', compId)
+      if (error) { alert('Error: '+error.message); return }
+      await load(); return
     }
 
     if (el.dataset.action === 'add-qitem') {
       const val = document.getElementById('qitem-name')?.value?.trim(); if (!val) return
-      CFG.quick_items = [...(CFG.quick_items||[]), { name:val, prices:[] }]; render(); return
+      const { error } = await sb.from('quick_items').insert({
+        name: val, prices: [], sort_order: (state.data.quickItems||[]).length + 1
+      })
+      if (error) { alert('Error: '+error.message); return }
+      await load(); return
     }
     if (el.dataset.action === 'save-qitems') {
-      const { error } = await sb.from('shop_config').update({ quick_items:CFG.quick_items }).eq('id',1)
-      if (error) { alert('Save failed: '+error.message); return }
-      alert('Quick items saved.'); await load(); return
+      // Save is now per-item directly to quick_items table
+      // Individual add/remove handlers do the DB work — this just refreshes
+      await load(); return
     }
     if (el.dataset.removeQitem !== undefined) {
-      const items = [...(CFG.quick_items||[])]
-      items.splice(Number(el.dataset.removeQitem), 1); CFG.quick_items = items; render(); return
+      const item = (state.data.quickItems||[])[Number(el.dataset.removeQitem)]
+      if (!item) return
+      const { error } = await sb.from('quick_items').delete().eq('id', item.id)
+      if (error) { alert('Error: '+error.message); return }
+      await load(); return
     }
     if (el.dataset.addQprice !== undefined) {
-      const idx = Number(el.dataset.addQprice)
-      const val = Number(document.getElementById(`qprice-input-${idx}`)?.value)
+      const idx  = Number(el.dataset.addQprice)
+      const val  = Number(document.getElementById(`qprice-input-${idx}`)?.value)
       if (!val || val <= 0) return
-      CFG.quick_items[idx].prices.push(val); render(); return
+      const item = (state.data.quickItems||[])[idx]
+      if (!item) return
+      const newPrices = [...(item.prices||[]), val]
+      const { error } = await sb.from('quick_items').update({ prices: newPrices }).eq('id', item.id)
+      if (error) { alert('Error: '+error.message); return }
+      await load(); return
     }
     if (el.dataset.removeQprice !== undefined) {
       const [i,pi] = el.dataset.removeQprice.split('-').map(Number)
-      CFG.quick_items[i].prices.splice(pi, 1); render(); return
+      const item = (state.data.quickItems||[])[i]
+      if (!item) return
+      const newPrices = [...(item.prices||[])]
+      newPrices.splice(pi, 1)
+      const { error } = await sb.from('quick_items').update({ prices: newPrices }).eq('id', item.id)
+      if (error) { alert('Error: '+error.message); return }
+      await load(); return
     }
 
     if (el.dataset.comp !== undefined) {
@@ -1235,7 +1319,8 @@ function attachEvents() {
       const amount  = Number(document.querySelector(`[data-settle-amount="${udharId}"]`)?.value)
       const method  = document.querySelector(`[data-settle-method="${udharId}"]`)?.value || 'Cash'
       if (!amount || amount <= 0) { alert('Enter a valid amount.'); return }
-      openPinPrompt('settle', async () => {
+      openPinPrompt('settle', async (verified) => {
+        if (!verified) return
         const rec = state.data.udhar.find(u => u.id === udharId); if (!rec) return
         const history = rec.payment_history || []
         history.push({ date:new Date().toISOString().slice(0,10), paid:amount, method })
@@ -1418,20 +1503,15 @@ function attachEvents() {
 }
 
 async function verifyAdminLocal(pin) {
-  return String(pin)===String(CFG.admin_password)||String(pin)===String(CFG.override_pin)
-    ? { ok:true } : { ok:false }
+  return String(pin) === String(CFG.override_pin)
+    ? { ok: true } : { ok: false }
 }
 
 /* ── Public ── */
 export async function initAdmin(sess, module, query) {
-  SESSION = sess
+  SESSION    = sess
   state.role = sess.isAdmin ? 'Business Owner' : (sess.employee?.role || 'Manager')
   if (module) adminState.adminModule = module
+  _eventsAttached = false  // reset so attachEvents fires on each module init
   await load()
-}
-
-function onLoginSuccess(sess) {
-  SESSION = sess
-  state.role = sess.isAdmin ? 'Business Owner' : (sess.employee?.role || '')
-  initAdmin(sess)
 }

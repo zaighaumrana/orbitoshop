@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Track Your Repair</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary:   #126c5b;
+      --bg:        #f6f8fb;
+      --surface:   #ffffff;
+      --border:    #e2e8f0;
+      --text:      #0f172a;
+      --muted:     #64748b;
+      --success:   #22c55e;
+      --warning:   #f59e0b;
+      --danger:    #ef4444;
+      --radius:    12px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 520px;
+      display: grid;
+      gap: 20px;
+    }
+
+    .logo-wrap {
+      text-align: center;
+      padding: 24px 0 8px;
+    }
+
+    .shop-logo {
+      max-width: 120px;
+      max-height: 48px;
+      object-fit: contain;
+      margin-bottom: 10px;
+    }
+
+    .shop-name {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    .tagline {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+
+    .search-card h2 {
+      font-size: 16px;
+      margin-bottom: 14px;
+      color: var(--text);
+    }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 11px 14px;
+      font-size: 15px;
+      background: var(--bg);
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input[type="text"]:focus {
+      border-color: var(--primary);
+    }
+
+    button.track-btn {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 11px 20px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+
+    button.track-btn:hover { opacity: 0.88; }
+    button.track-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .hint {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+
+    .error-msg {
+      color: var(--danger);
+      font-size: 14px;
+      padding: 10px 14px;
+      background: #fef2f2;
+      border-radius: 8px;
+      border: 1px solid #fecaca;
+      display: none;
+    }
+
+    /* ── Result card ── */
+    .result-card { display: none; }
+
+    .ticket-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .ticket-number {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 3px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border-radius: 100px;
+      font-size: 13px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+
+    .status-badge .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .badge-pending    { background: #fef3c7; color: #92400e; }
+    .badge-progress   { background: #dbeafe; color: #1e40af; }
+    .badge-ready      { background: #dcfce7; color: #166534; }
+    .badge-delivered  { background: #f0fdf4; color: #15803d; }
+    .badge-declined   { background: #fef2f2; color: #991b1b; }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px 16px;
+      margin-bottom: 16px;
+    }
+
+    .info-item .label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+      margin-bottom: 3px;
+    }
+
+    .info-item .value {
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 14px 0;
+    }
+
+    .components-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .component-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+
+    .component-row:last-child { border-bottom: none; }
+
+    .comp-name { font-weight: 500; }
+
+    .comp-tag {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 100px;
+      background: #fef3c7;
+      color: #92400e;
+      margin-left: 6px;
+    }
+
+    .note-box {
+      background: #fffbeb;
+      border-left: 3px solid var(--warning);
+      border-radius: 0 8px 8px 0;
+      padding: 10px 14px;
+      font-size: 13px;
+      margin-top: 12px;
+    }
+
+    /* ── Timeline ── */
+    .timeline {
+      display: grid;
+      gap: 0;
+    }
+
+    .tl-step {
+      display: flex;
+      gap: 14px;
+      padding-bottom: 18px;
+      position: relative;
+    }
+
+    .tl-step:last-child { padding-bottom: 0; }
+
+    .tl-step:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      left: 11px;
+      top: 24px;
+      bottom: 0;
+      width: 2px;
+      background: var(--border);
+    }
+
+    .tl-dot {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      background: var(--bg);
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .tl-dot.done {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .tl-dot.active {
+      border-color: var(--warning);
+      background: var(--warning);
+      color: #fff;
+    }
+
+    .tl-content { padding-top: 2px; }
+
+    .tl-label {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .tl-desc {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .contact-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .contact-row a {
+      color: var(--primary);
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .footer {
+      text-align: center;
+      font-size: 12px;
+      color: var(--muted);
+      padding: 8px 0 24px;
+    }
+
+    @media (max-width: 480px) {
+      .info-grid { grid-template-columns: 1fr; }
+      .input-row { flex-direction: column; }
+      button.track-btn { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Shop branding — filled by JS -->
+  <div class="logo-wrap" id="shop-brand">
+    <div class="shop-name" id="shop-name">RetailOS</div>
+    <div class="tagline">Repair Status Tracker</div>
+  </div>
+
+  <!-- Search -->
+  <div class="card search-card">
+    <h2>Track Your Repair</h2>
+    <div class="input-row">
+      <input type="text" id="search-input"
+        placeholder="Ticket # or phone number"
+        autocomplete="off" autocorrect="off" spellcheck="false"
+        inputmode="text">
+      <button class="track-btn" id="track-btn" onclick="doTrack()">Track</button>
+    </div>
+    <p class="hint">Enter your ticket number (e.g. FP-2026-1234) or the phone number you registered with.</p>
+    <div class="error-msg" id="error-msg"></div>
+  </div>
+
+  <!-- Result -->
+  <div class="card result-card" id="result-card">
+
+    <div class="ticket-header">
+      <div>
+        <div style="font-size:18px;font-weight:700" id="res-device"></div>
+        <div class="ticket-number" id="res-ticket-num"></div>
+      </div>
+      <div class="status-badge" id="res-status-badge">
+        <span class="dot"></span>
+        <span id="res-status-text"></span>
+      </div>
+    </div>
+
+    <div class="info-grid">
+      <div class="info-item">
+        <div class="label">Customer</div>
+        <div class="value" id="res-customer"></div>
+      </div>
+      <div class="info-item">
+        <div class="label">Date In</div>
+        <div class="value" id="res-date"></div>
+      </div>
+      <div class="info-item" id="res-imei-wrap" style="display:none">
+        <div class="label">IMEI</div>
+        <div class="value" id="res-imei"></div>
+      </div>
+      <div class="info-item" id="res-quote-wrap" style="display:none">
+        <div class="label">Estimated Quote</div>
+        <div class="value" id="res-quote"></div>
+      </div>
+    </div>
+
+    <!-- Timeline -->
+    <hr class="divider">
+    <div class="components-title">Repair Progress</div>
+    <div class="timeline" id="res-timeline"></div>
+
+    <!-- Components (if any) -->
+    <div id="res-comps-wrap" style="display:none">
+      <hr class="divider">
+      <div class="components-title">Issues Reported</div>
+      <div id="res-comps"></div>
+    </div>
+
+    <!-- Technician note -->
+    <div class="note-box" id="res-note" style="display:none"></div>
+  </div>
+
+  <!-- Contact -->
+  <div class="contact-row" id="contact-row" style="display:none">
+    Questions? Call us at <a id="shop-phone" href="#">—</a>
+  </div>
+
+  <div class="footer" id="shop-footer"></div>
+
+</div>
+
+<script type="module">
+  import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm'
+
+  /* ── Supabase — reads from the same client project ── */
+  const SUPABASE_URL  = 'https://kxmovywgshyltwusghhj.supabase.co'
+  const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt4bW92eXdnc2h5bHR3dXNnaGhqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExODM2OTIsImV4cCI6MjA5Njc1OTY5Mn0.JGDedCaow_Vg5Pk5RC6XprzKmRsaCCUNGWg1TaWAGLg'
+  const sb = createClient(SUPABASE_URL, SUPABASE_ANON)
+
+  /* ── Load shop branding ── */
+  async function loadBranding() {
+    const { data } = await sb.from('shop_config').select(
+      'shop_name, shop_logo, shop_phone, shop_address, terms_text, primary_color, live_tracking_enabled'
+    ).single()
+    if (!data) return
+
+    if (!data.live_tracking_enabled) {
+      document.body.innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;
+                    justify-content:center;height:100vh;gap:12px;text-align:center;padding:24px">
+          <div style="font-size:48px">🔒</div>
+          <h2>Tracking Unavailable</h2>
+          <p style="color:#64748b;max-width:320px">
+            Online repair tracking is not enabled for this shop.
+            Please contact us directly for updates.
+          </p>
+          ${data.shop_phone ? `<a href="tel:${data.shop_phone}" style="color:#126c5b;font-weight:600">${data.shop_phone}</a>` : ''}
+        </div>`
+      return
+    }
+
+    if (data.primary_color) {
+      document.documentElement.style.setProperty('--primary', data.primary_color)
+    }
+
+    document.getElementById('shop-name').textContent = data.shop_name || 'RetailOS'
+    document.title = `Track Repair — ${data.shop_name || 'RetailOS'}`
+
+    if (data.shop_logo) {
+      const img = document.createElement('img')
+      img.src = data.shop_logo
+      img.className = 'shop-logo'
+      img.alt = data.shop_name
+      document.getElementById('shop-brand').prepend(img)
+    }
+
+    if (data.shop_phone) {
+      document.getElementById('contact-row').style.display = 'flex'
+      const phoneEl = document.getElementById('shop-phone')
+      phoneEl.textContent = data.shop_phone
+      phoneEl.href = `tel:${data.shop_phone}`
+    }
+
+    if (data.terms_text) {
+      document.getElementById('shop-footer').textContent = data.terms_text
+    }
+
+    // Pre-fill from URL param ?t=FP-2026-1234
+    const urlParam = new URLSearchParams(window.location.search).get('t')
+    if (urlParam) {
+      document.getElementById('search-input').value = urlParam
+      doTrack()
+    }
+  }
+
+  /* ── Status mapping ── */
+  const STATUS_MAP = {
+    'Pending':     { label: 'Received',          desc: 'Your device has been received and is waiting to be assessed.', class: 'badge-pending',   icon: '📥', step: 1 },
+    'In Progress': { label: 'Being Repaired',     desc: 'Our technician is currently working on your device.',          class: 'badge-progress',  icon: '🔧', step: 2 },
+    'Ready':       { label: 'Ready for Pickup',   desc: 'Your device is repaired and ready to be collected.',           class: 'badge-ready',     icon: '✅', step: 3 },
+    'Delivered':   { label: 'Collected',          desc: 'Your device has been collected. Thank you!',                   class: 'badge-delivered', icon: '🎉', step: 4 },
+    'Declined':    { label: 'Repair Declined',    desc: 'The repair could not be completed. Please contact us.',        class: 'badge-declined',  icon: '❌', step: 0 },
+  }
+
+  const TIMELINE_STEPS = [
+    { key: 1, label: 'Device Received',   desc: 'We have received your device for repair.' },
+    { key: 2, label: 'Under Repair',      desc: 'Our technician is working on your device.' },
+    { key: 3, label: 'Ready for Pickup',  desc: 'Repair complete — ready to collect.' },
+    { key: 4, label: 'Collected',         desc: 'Device handed back to owner.' },
+  ]
+
+  function moneyFmt(v) {
+    return `Rs. ${Number(v||0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+  }
+
+  /* ── Main search ── */
+  window.doTrack = async function() {
+    const raw = document.getElementById('search-input').value.trim()
+    if (!raw) return
+
+    const btn    = document.getElementById('track-btn')
+    const errEl  = document.getElementById('error-msg')
+    const resEl  = document.getElementById('result-card')
+
+    btn.disabled = true
+    btn.textContent = 'Searching…'
+    errEl.style.display = 'none'
+    resEl.style.display = 'none'
+
+    // Search by ticket_number OR invoice_number OR customer_phone
+    const { data, error } = await sb.from('tickets')
+      .select('*')
+      .or(`ticket_number.ilike.%${raw}%,invoice_number.ilike.%${raw}%,customer_phone.ilike.%${raw}%`)
+      .order('created_at', { ascending: false })
+      .limit(1)
+
+    btn.disabled = false
+    btn.textContent = 'Track'
+
+    if (error || !data || data.length === 0) {
+      errEl.textContent = 'No repair found with that ticket number or phone. Please check and try again.'
+      errEl.style.display = 'block'
+      return
+    }
+
+    renderResult(data[0])
+  }
+
+  function renderResult(t) {
+    const statusInfo = STATUS_MAP[t.status] || STATUS_MAP['Pending']
+    const currentStep = statusInfo.step
+
+    // Status badge
+    const badge = document.getElementById('res-status-badge')
+    badge.className = `status-badge ${statusInfo.class}`
+    document.getElementById('res-status-text').textContent = statusInfo.label
+
+    // Device + ticket number
+    document.getElementById('res-device').textContent = `${t.device_brand} ${t.device_model}`
+    document.getElementById('res-ticket-num').textContent = t.invoice_number || t.ticket_number
+
+    // Info grid
+    document.getElementById('res-customer').textContent = t.customer_name
+    document.getElementById('res-date').textContent = new Date(t.created_at).toLocaleDateString(undefined, {
+      day: 'numeric', month: 'short', year: 'numeric'
+    })
+
+    if (t.imei) {
+      document.getElementById('res-imei').textContent = t.imei
+      document.getElementById('res-imei-wrap').style.display = 'block'
+    }
+
+    const quote = Number(t.final_total || t.estimated_quote || 0)
+    if (quote > 0) {
+      document.getElementById('res-quote').textContent = moneyFmt(quote)
+      document.getElementById('res-quote-wrap').style.display = 'block'
+    }
+
+    // Timeline
+    const tlEl = document.getElementById('res-timeline')
+    if (t.status === 'Declined') {
+      tlEl.innerHTML = `
+        <div class="tl-step">
+          <div class="tl-dot active">❌</div>
+          <div class="tl-content">
+            <div class="tl-label">Repair Declined</div>
+            <div class="tl-desc">The repair could not be completed. Please contact us for details.</div>
+          </div>
+        </div>`
+    } else {
+      tlEl.innerHTML = TIMELINE_STEPS.map(step => {
+        const done   = currentStep > step.key
+        const active = currentStep === step.key
+        return `
+          <div class="tl-step">
+            <div class="tl-dot ${done ? 'done' : active ? 'active' : ''}">
+              ${done ? '✓' : active ? '●' : ''}
+            </div>
+            <div class="tl-content">
+              <div class="tl-label" style="color:${active ? 'var(--text)' : done ? 'var(--text)' : 'var(--muted)'}">
+                ${step.label}
+              </div>
+              ${active || done ? `<div class="tl-desc">${active ? statusInfo.desc : step.desc}</div>` : ''}
+            </div>
+          </div>`
+      }).join('')
+    }
+
+    // Components
+    const comps = (t.components_noted || []).filter(c => c.name)
+    if (comps.length) {
+      document.getElementById('res-comps-wrap').style.display = 'block'
+      document.getElementById('res-comps').innerHTML = comps.map(c => `
+        <div class="component-row">
+          <span>
+            <span class="comp-name">${c.name}</span>
+            <span class="comp-tag">${c.tag || c.condition || ''}</span>
+            ${c.customText ? `<span style="font-size:12px;color:var(--muted)"> — ${c.customText}</span>` : ''}
+          </span>
+        </div>`).join('')
+    } else {
+      document.getElementById('res-comps-wrap').style.display = 'none'
+    }
+
+    // Technician note (only show if it's not internal-only info)
+    if (t.technician_note) {
+      const noteEl = document.getElementById('res-note')
+      noteEl.style.display = 'block'
+      noteEl.innerHTML = `<strong>Note:</strong> ${t.technician_note}`
+    }
+
+    document.getElementById('result-card').style.display = 'block'
+    document.getElementById('result-card').scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  // Enter key triggers search
+  document.getElementById('search-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doTrack()
+  })
+
+  loadBranding()
+</script>
+</body>
+</html>

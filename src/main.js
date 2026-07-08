@@ -27,8 +27,12 @@ async function boot() {
     return
   }
 
-  setupRoutes(SESSION)
-  startRouter()
+  // EMS gate on refresh/revisit too
+  const { checkClockIn } = await import('./admin/ems.js')
+  checkClockIn(SESSION, CFG, () => {
+    setupRoutes(SESSION)
+    startRouter()
+  })
 }
 
 function setupRoutes(SESSION) {
@@ -44,7 +48,7 @@ function setupRoutes(SESSION) {
     initWorkshop(SESSION)
   })
 
-  const adminModules = ['dashboard','repairs','inventory','reports','employees','receipts','settings']
+  const adminModules = ['dashboard','repairs','inventory','reports','employees','receipts','ems','settings']
   adminModules.forEach(mod => {
     registerRoute(`/admin/${mod}`, async (params, query) => {
       const { initAdmin } = await import('./admin/admin.js')
@@ -68,13 +72,15 @@ async function onLoginSuccess(SESSION) {
   const role = SESSION.isAdmin ? 'Business Owner' : (SESSION.employee?.role || '')
   state.role = role
 
-  setupRoutes(SESSION)
-
-  if (role === 'Business Owner' || role === 'Manager') navigate('/admin/dashboard')
-  else if (role === 'Technician') navigate('/workshop')
-  else navigate('/pos')
-
-  startRouter()
+  // EMS clock-in gate — fires before any view loads
+  const { checkClockIn } = await import('./admin/ems.js')
+  checkClockIn(SESSION, CFG, async () => {
+    setupRoutes(SESSION)
+    if (role === 'Business Owner' || role === 'Manager') navigate('/admin/dashboard')
+    else if (role === 'Technician') navigate('/workshop')
+    else navigate('/pos')
+    startRouter()
+  })
 }
 
 window.addEventListener('online',  () => { state.online = true })

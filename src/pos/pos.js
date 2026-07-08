@@ -4,11 +4,17 @@
    Single attachEvents() architecture, router-driven navigation.
 ═══════════════════════════════════════════════════════════════════ */
 import {
+  leaveRequestHTML,
+  submitLeaveRequest,
+  handleClockOut,
+} from '../admin/ems.js'
+
+import {
   sb, state, CFG, loadConfig, applyBranding, currentTenant,
-  _loadSession, _clearSession,
+  _clearSession,
   money, fld, modalActions,
   openPinPrompt, pinPromptHTML, handlePpKey,
-  logBillEvent, logInventoryEvent,
+  logBillEvent,
 } from '../shared.js'
 
 import { navigate } from '../router.js'
@@ -36,20 +42,24 @@ async function load() {
   const fetchInv = CFG.inventory_module_enabled
     ? sb.from('inventory').select('*').order('name')
     : Promise.resolve({ data: [] })
-  const [tickets, sales, udhar, returns_, inv] = await Promise.all([
+  const [tickets, sales, udhar, returns_, inv, quickItems, repairComponents] = await Promise.all([
     sb.from('tickets').select('*').order('id', { ascending: false }),
     sb.from('sales').select('*').order('id', { ascending: false }),
     sb.from('udhar').select('*').order('id', { ascending: false }),
     sb.from('returns').select('*').order('id', { ascending: false }),
     fetchInv,
+    sb.from('quick_items').select('*').order('sort_order'),
+    sb.from('repair_components').select('*').order('sort_order'),
   ])
   state.data = {
-    tickets:   tickets.data   || [],
-    sales:     sales.data     || [],
-    employees: [],
-    udhar:     udhar.data     || [],
-    returns:   returns_.data  || [],
-    inventory: inv.data       || [],
+    tickets:          tickets.data          || [],
+    sales:            sales.data            || [],
+    employees:        [],
+    udhar:            udhar.data            || [],
+    returns:          returns_.data         || [],
+    inventory:        inv.data              || [],
+    quickItems:       quickItems.data       || [],
+    repairComponents: repairComponents.data || [],
   }
   applyBranding()
   render()
@@ -94,6 +104,11 @@ function render() {
             <span class="chip"><i class="dot ${state.online?'':'offline'}"></i>${state.online?'Online':'Offline'}</span>
             ${state.installPrompt?`<button class="icon-button" data-action="install">Install</button>`:''}
             <button class="icon-button" data-action="theme">${state.theme==='dark'?'Light':'Dark'}</button>
+            ${CFG.ems_enabled && !(SESSION.isAdmin || SESSION.employee?.role === 'Business Owner') ? `
+              <button class="secondary-button" style="font-size:12px" data-action="ems-clock-out">
+                🕐 Clock Out
+              </button>
+            ` : ''}
             <button class="icon-button" data-action="logout" style="color:var(--danger)">Logout</button>
           </div>
         </header>
@@ -130,7 +145,10 @@ function posView() {
         ${CFG.repair_module_enabled ? `
           <button class="primary-button" data-modal="repair">+ New Ticket</button>
           <button class="secondary-button" data-action="open-repair-collection">🔧 Repairs</button>` : ''}
-        <button class="secondary-button" data-action="open-return">↩ Return</button>
+        ${CFG.ems_enabled && !(SESSION.isAdmin || SESSION.employee?.role === 'Business Owner') ? `
+          <button class="secondary-button" data-action="open-leave-request">📋 Leave</button>
+        ` : ''}
+          <button class="secondary-button" data-action="open-return">↩ Return</button>
         <button class="secondary-button" data-action="open-udhar">₨ Credits</button>
       </div>
     </div>
@@ -211,7 +229,7 @@ function posView() {
 }
 
 function quickItemsPanel() {
-  if (!(CFG.quick_items||[]).length) return `
+  if (!(state.data.quickItems||[]).length) return `
     <div class="card">
       <h2 style="margin-bottom:12px">Custom Item</h2>
       ${customItemEntry()}
@@ -220,7 +238,7 @@ function quickItemsPanel() {
     <div class="card">
       <h2 style="margin-bottom:12px">Quick Items</h2>
       <div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:14px">
-        ${CFG.quick_items.map(item=>`
+        ${state.data.quickItems.map(item=>`
           <button class="secondary-button" style="font-size:15px;padding:11px 18px;border-radius:10px;font-weight:500"
             data-qitem-name="${item.name}" data-qitem-prices='${JSON.stringify(item.prices)}'>
             ${item.name}
@@ -364,7 +382,7 @@ function calcDraftPaid(draft) {
 
 /* ── Repair ticket form modal ── */
 function repairTicketFormHTML() {
-  const comps    = CFG.quick_components || []
+  const comps    = state.data.repairComponents || []
   const draft    = getDraft()
   const dInfo    = state.modal._info || {}
   const total    = calcDraftTotal(draft)
@@ -393,7 +411,7 @@ function repairTicketFormHTML() {
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
         ${comps.map(c => `
           <button type="button" class="secondary-button" style="font-size:13px;padding:6px 14px"
-            data-pick-comp="${c}">${c}</button>`).join('')}
+            data-pick-comp="${c.name}">${c.name}</button>`).join('')}
       </div>
 
       ${draft.components.length ? `
@@ -418,7 +436,7 @@ function repairTicketFormHTML() {
       <div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface-2);
                   border-radius:8px;margin-bottom:12px">
         <label style="flex:1;font-size:13px;font-weight:500">Labour Charge</label>
-        <input type="number" step="any" min="0" value="${draft.labour||0}" data-draft-labour
+        <input type="number" step="any" min="0" value="${draft.labour||''}" placeholder="0" data-draft-labour
           style="width:120px;border:1px solid var(--border);border-radius:6px;padding:6px 8px;background:var(--surface);color:var(--text)">
       </div>
 
@@ -582,6 +600,10 @@ function openCollectTicket(ticket) {
 function renderModal() {
   if (!state.modal) return ''
   const { type } = state.modal
+
+  if (type === 'leave-request') return leaveRequestHTML()
+
+  if (type === 'leave-request') return leaveRequestHTML()
 
   if (type === 'pinPrompt') return `<div class="modal-backdrop">${pinPromptHTML(state.modal.purpose)}</div>`
 
@@ -935,6 +957,14 @@ function attachEvents() {
       localStorage.setItem('retailos-theme', state.theme)
       applyBranding(); render(); return
     }
+    if (el.dataset.action === 'ems-clock-out') {
+      const { handleClockOut } = await import('../admin/ems.js')
+      handleClockOut(SESSION, async () => {
+        if (!confirm('Clocked out. Log out now?')) return
+        _clearSession(); navigate('/login')
+      })
+      return
+    }
     if (el.dataset.action === 'logout') {
       if (!confirm('Log out?')) return
       _clearSession(); navigate('/login'); return
@@ -1122,6 +1152,10 @@ function attachEvents() {
 
     /* ── Udhar / Return ── */
     if (el.dataset.action === 'open-udhar')   { state.modal = { type:'udharList' };  render(); return }
+    if (el.dataset.action === 'open-leave-request') {
+      state.modal = { type: 'leave-request' }; render(); return
+    }
+  
     if (el.dataset.action === 'open-return')  { state.modal = { type:'returnFlow' }; render(); return }
 
     /* ── Settle Udhar ── */
@@ -1258,6 +1292,13 @@ function attachEvents() {
       }, render); return
     }
 
+    if (type === 'leave-request') {
+      const result = await submitLeaveRequest(SESSION, data)
+      if (!result.ok) { alert('Error: ' + result.error); return }
+      state.modal = null
+      alert('Leave request submitted. Your manager will review it.')
+      render(); return
+    }
     if (type === 'override') {
       const item = posState.cart.find(i=>i.productId===state.modal?.id)
       if (item) {
@@ -1300,7 +1341,7 @@ function _refreshDraftTotals() {
 }
 
 async function verifyAdminLocal(pin) {
-  return String(pin)===String(CFG.admin_password)||String(pin)===String(CFG.override_pin)
+  return String(pin)===String(CFG.override_pin)
     ? { ok:true } : { ok:false }
 }
 

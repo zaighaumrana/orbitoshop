@@ -96,10 +96,14 @@ function resolve(pathname, search = '') {
 /**
  * Call once at boot. Resolves the current URL and listens for back/forward.
  */
+let _routerStarted = false
 export function startRouter() {
-  window.addEventListener('popstate', () => {
-    resolve(window.location.pathname, window.location.search)
-  })
+  if (!_routerStarted) {
+    _routerStarted = true
+    window.addEventListener('popstate', () => {
+      resolve(window.location.pathname, window.location.search)
+    })
+  }
   resolve(window.location.pathname, window.location.search)
 }
 

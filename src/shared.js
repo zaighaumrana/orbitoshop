@@ -45,7 +45,7 @@ export const state = {
   filter:        '',
   modal:         null,
   installPrompt: null,
-  data:          { tickets:[], sales:[], employees:[], udhar:[], returns:[], inventory:[] },
+  data:          { tickets:[], sales:[], employees:[], udhar:[], returns:[], inventory:[], quickItems:[], repairComponents:[] },
 }
 
 /* ── Session ── */
@@ -75,12 +75,9 @@ export let CFG = {
   shop_logo: '', shop_description: '', primary_color: '#126c5b',
   secondary_color: '#e9b949', currency: 'Rs.', tax_rate: 0,
   terms_text: 'Warranty: 30 days on parts replaced.',
-  owner_email: '', owner_password: '', admin_password: '1234',
-  override_pin: '1234', discount_pin_required: true,
+  owner_email: '', owner_password: '', override_pin: '',
+  discount_pin_required: true,
   partial_udhar_allowed: true,
-  quick_components: ['Screen','Battery','Body','Board','Camera','Mic',
-    'Speaker','Charging Port','Back Glass','SIM Tray','Power Button','Volume Button'],
-  quick_items: [],
   repair_module_enabled: true, inventory_module_enabled: false,
   technician_module_enabled: true, live_tracking_enabled: false,
   ems_enabled: false, suspended: false,
@@ -90,14 +87,20 @@ export async function loadConfig() {
   const { data, error } = await sb.from('shop_config').select('*').single()
   if (error) { console.warn('Config load failed:', error.message); return }
   Object.assign(CFG, data)
-  if (typeof CFG.quick_components === 'string') {
-    try { CFG.quick_components = JSON.parse(CFG.quick_components) } catch {}
-  }
-  if (typeof CFG.quick_items === 'string') {
-    try { CFG.quick_items = JSON.parse(CFG.quick_items) } catch { CFG.quick_items = [] }
-  }
-  if (!Array.isArray(CFG.quick_items)) CFG.quick_items = []
 }
+
+export async function loadQuickItems() {
+  const { data, error } = await sb.from('quick_items').select('*').order('sort_order')
+  if (error) { console.warn('Quick items load failed:', error.message); return [] }
+  return data || []
+}
+
+export async function loadRepairComponents() {
+  const { data, error } = await sb.from('repair_components').select('*').order('sort_order')
+  if (error) { console.warn('Repair components load failed:', error.message); return [] }
+  return data || []
+}
+
 
 export function applyBranding() {
   document.documentElement.dataset.theme = state.theme
@@ -140,8 +143,8 @@ export const statusBadge = s => {
 
 /* ── Access control ── */
 export const ACCESS = {
-  'Business Owner': ['dashboard','repairs','inventory','reports','receipts','employees','settings','pos','workshop'],
-  'Manager':        ['dashboard','repairs','inventory','reports','receipts','employees'],
+  'Business Owner': ['dashboard','repairs','inventory','reports','receipts','employees','ems','settings','pos','workshop'],
+  'Manager':        ['dashboard','repairs','inventory','reports','receipts','employees','ems'],
   'Cashier':        ['pos'],
   'Technician':     ['workshop'],
 }

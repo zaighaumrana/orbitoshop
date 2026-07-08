@@ -44,6 +44,10 @@ export function buildTicketSlip(ticket) {
     <div class="ln"></div>
     ${ticket.technician_note ? `<div class="sm">Note: ${ticket.technician_note}</div><div class="ln"></div>` : ''}
     ${CFG.terms_text ? `<div class="c sm">${CFG.terms_text}</div><div class="ln"></div>` : ''}
+    <div class="ln"></div>
+    <div class="c sm">Track your repair online:</div>
+    <div class="c b">orbitoshop.ahwad.com/track</div>
+    <div class="c sm">Ticket: ${ticket.ticket_number}</div>
     <div class="c sm">Thank you for your trust.</div>`
 }
 
