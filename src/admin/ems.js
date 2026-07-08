@@ -98,7 +98,7 @@ function renderClockInScreen(sess, isReturn) {
             ${isReturn ? '👋' : '🕐'}
           </div>
           <h2 style="margin:0 0 6px">
-            ${isReturn ? 'Welcome Back' : 'Good ${_greeting()}, ${sess.employee.name.split(' ')[0]}!'}
+            ${isReturn ? 'Welcome Back' : `Good ${_greeting()}, ${sess.employee.name.split(' ')[0]}!`}
           </h2>
           <p class="muted" style="font-size:13px">${date}</p>
         </div>
