@@ -103,6 +103,12 @@ function render() {
             <span class="chip"><strong style="font-size:12px">${SESSION.employee.name}</strong></span>
             <span class="chip"><i class="dot ${state.online?'':'offline'}"></i>${state.online?'Online':'Offline'}</span>
             ${state.installPrompt?`<button class="icon-button" data-action="install">Install</button>`:''}
+            ${(SESSION.isAdmin || SESSION.employee?.role === 'Business Owner') ? `
+              <button class="secondary-button" data-action="go-admin">Admin</button>
+              ${CFG.technician_module_enabled
+                ? `<button class="secondary-button" data-action="go-workshop">Workshop</button>`
+                : ''}
+            ` : ''}
             <button class="icon-button" data-action="theme">${state.theme==='dark'?'Light':'Dark'}</button>
             ${CFG.ems_enabled && !(SESSION.isAdmin || SESSION.employee?.role === 'Business Owner') ? `
               <button class="secondary-button" style="font-size:12px" data-action="ems-clock-out">
@@ -952,6 +958,12 @@ function attachEvents() {
     if (el.dataset.modal) { state.modal = { type: el.dataset.modal, id: el.dataset.id }; render(); return }
 
     /* ── Top-bar ── */
+    if (el.dataset.action === 'go-admin') {
+      navigate('/admin'); return
+    }
+    if (el.dataset.action === 'go-workshop') {
+      navigate('/workshop'); return
+    }
     if (el.dataset.action === 'theme') {
       state.theme = state.theme==='dark'?'light':'dark'
       localStorage.setItem('retailos-theme', state.theme)
