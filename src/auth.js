@@ -133,5 +133,8 @@ async function forgotPassword() {
       .select('id').eq('email', email.toLowerCase()).maybeSingle()
     if (!data) { alert('No account found with that email.\nContact your administrator.'); return }
   }
-  alert(`Password reset requested for ${email}.\nContact your RetailOS administrator to reset your password.`)
+  const { requestPasswordReset } = await import('./shared.js')
+  const res = await requestPasswordReset(email)
+  if (!res.ok) { alert('Something went wrong: ' + res.error); return }
+  alert(`Reset requested for ${email}.\nYour administrator will see this in Admin → Employees → Password Resets and set a new password for you.`)
 }

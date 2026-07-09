@@ -13,6 +13,7 @@ import {
   sb, state, CFG, loadConfig, applyBranding, currentTenant,
   _clearSession, money, fld, modalActions,
   openPinPrompt, pinPromptHTML, handlePpKey,
+  myAccountModalHTML, handleChangePasswordSubmit,
 } from '../shared.js'
 
 import { navigate } from '../router.js'
@@ -78,6 +79,7 @@ function render() {
               <button class="secondary-button" data-action="go-pos">POS</button>
               <button class="secondary-button" data-action="go-admin">Admin</button>
             ` : ''}
+            <button class="icon-button" data-action="my-account" title="My Account">👤</button>
             <button class="icon-button" data-action="theme">
               ${state.theme === 'dark' ? 'Light' : 'Dark'}
             </button>
@@ -274,6 +276,8 @@ function renderModal() {
   const { type, id } = state.modal
 
   if (type === 'leave-request') return leaveRequestHTML()
+
+  if (type === 'myAccount') return myAccountModalHTML(SESSION)
 
   if (type === 'pinPrompt') {
     return `<div class="modal-backdrop">${pinPromptHTML(state.modal.purpose)}</div>`
@@ -490,6 +494,9 @@ function attachEvents() {
       const { initAdmin } = await import('../admin/admin.js')
       initAdmin(SESSION, 'dashboard', {}); return
     }
+    if (el.dataset.action === 'my-account') {
+      state.modal = { type: 'myAccount' }; render(); return
+    }
     if (el.dataset.action === 'theme') {
       state.theme = state.theme === 'dark' ? 'light' : 'dark'
       localStorage.setItem('retailos-theme', state.theme)
@@ -633,6 +640,17 @@ function attachEvents() {
       if (!result.ok) { alert('Error: ' + result.error); return }
       state.modal = null
       alert('Leave request submitted. Your manager will review it.')
+      render(); return
+    }
+    if (form.dataset.form === 'change-password') {
+      const result = await handleChangePasswordSubmit(SESSION, data)
+      const errEl = document.getElementById('change-password-error')
+      if (!result.ok) {
+        if (errEl) { errEl.textContent = result.error; errEl.classList.remove('hidden') }
+        return
+      }
+      state.modal = null
+      alert('Password updated.')
       render(); return
     }
   })

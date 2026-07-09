@@ -15,6 +15,7 @@ import {
   money, fld, modalActions,
   openPinPrompt, pinPromptHTML, handlePpKey,
   logBillEvent,
+  myAccountModalHTML, handleChangePasswordSubmit,
 } from '../shared.js'
 
 import { navigate } from '../router.js'
@@ -103,12 +104,7 @@ function render() {
             <span class="chip"><strong style="font-size:12px">${SESSION.employee.name}</strong></span>
             <span class="chip"><i class="dot ${state.online?'':'offline'}"></i>${state.online?'Online':'Offline'}</span>
             ${state.installPrompt?`<button class="icon-button" data-action="install">Install</button>`:''}
-            ${(SESSION.isAdmin || SESSION.employee?.role === 'Business Owner') ? `
-              <button class="secondary-button" data-action="go-admin">Admin</button>
-              ${CFG.technician_module_enabled
-                ? `<button class="secondary-button" data-action="go-workshop">Workshop</button>`
-                : ''}
-            ` : ''}
+            <button class="icon-button" data-action="my-account" title="My Account">👤</button>
             <button class="icon-button" data-action="theme">${state.theme==='dark'?'Light':'Dark'}</button>
             ${CFG.ems_enabled && !(SESSION.isAdmin || SESSION.employee?.role === 'Business Owner') ? `
               <button class="secondary-button" style="font-size:12px" data-action="ems-clock-out">
@@ -609,7 +605,7 @@ function renderModal() {
 
   if (type === 'leave-request') return leaveRequestHTML()
 
-  if (type === 'leave-request') return leaveRequestHTML()
+  if (type === 'myAccount') return myAccountModalHTML(SESSION)
 
   if (type === 'pinPrompt') return `<div class="modal-backdrop">${pinPromptHTML(state.modal.purpose)}</div>`
 
@@ -958,11 +954,8 @@ function attachEvents() {
     if (el.dataset.modal) { state.modal = { type: el.dataset.modal, id: el.dataset.id }; render(); return }
 
     /* ── Top-bar ── */
-    if (el.dataset.action === 'go-admin') {
-      navigate('/admin'); return
-    }
-    if (el.dataset.action === 'go-workshop') {
-      navigate('/workshop'); return
+    if (el.dataset.action === 'my-account') {
+      state.modal = { type: 'myAccount' }; render(); return
     }
     if (el.dataset.action === 'theme') {
       state.theme = state.theme==='dark'?'light':'dark'
@@ -1302,6 +1295,18 @@ function attachEvents() {
         printThermal(buildReturnSlip({ saleId, items:returned, refund, method:data.refundMethod }))
         state.modal = null; await load()
       }, render); return
+    }
+
+    if (type === 'change-password') {
+      const result = await handleChangePasswordSubmit(SESSION, data)
+      const errEl = document.getElementById('change-password-error')
+      if (!result.ok) {
+        if (errEl) { errEl.textContent = result.error; errEl.classList.remove('hidden') }
+        return
+      }
+      state.modal = null
+      alert('Password updated.')
+      render(); return
     }
 
     if (type === 'leave-request') {

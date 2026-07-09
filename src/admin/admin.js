@@ -6,6 +6,8 @@ import {
   money, fld, modalActions, statusBadge,
   openPinPrompt, pinPromptHTML, handlePpKey,
   logBillEvent, logInventoryEvent,
+  myAccountModalHTML, handleChangePasswordSubmit,
+  generateTempPassword, listPendingResetRequests, resolvePasswordReset,
 } from '../shared.js'
 
 
@@ -121,6 +123,7 @@ function render() {
                 ? `<button class="secondary-button" data-action="go-workshop">Workshop</button>`
                 : ''}
             ` : ''}
+            <button class="icon-button" data-action="my-account" title="My Account">👤</button>
             <button class="icon-button" data-action="theme">
               ${state.theme === 'dark' ? 'Light' : 'Dark'}
             </button>
@@ -364,7 +367,8 @@ function employees() {
   const emps = state.data.employees || []
   return `
     ${tit('Employees','Staff roster, roles, and access control.',
-      `<button class="primary-button" data-modal="employee">Add Employee</button>`)}
+      `<button class="secondary-button" data-action="open-password-resets">🔑 Password Resets</button>
+       <button class="primary-button" data-modal="employee">Add Employee</button>`)}
     <div class="card">
       ${emps.length ? `
         <div class="table-wrap"><table>
@@ -642,6 +646,27 @@ function renderModal() {
 
   if (type === 'pinPrompt') return `<div class="modal-backdrop">${pinPromptHTML(state.modal.purpose)}</div>`
 
+  if (type === 'myAccount') return myAccountModalHTML(SESSION)
+
+  if (type === 'passwordResets') {
+    const reqs = state.modal.requests || []
+    return `<div class="modal-backdrop"><div class="modal" style="max-width:520px">
+      <h2>Pending Password Resets</h2>
+      ${!reqs.length ? `<p class="muted">No pending requests.</p>` : `
+        <div style="display:grid;gap:10px;max-height:50vh;overflow-y:auto">
+          ${reqs.map(r => `
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;background:var(--surface-2);border-radius:8px">
+              <div>
+                <strong>${r.email}</strong><br>
+                <span class="muted" style="font-size:12px">Requested ${new Date(r.requested_at).toLocaleString()}</span>
+              </div>
+              <button class="secondary-button" data-action="resolve-reset" data-reset-id="${r.id}" data-reset-email="${r.email}">Set New Password</button>
+            </div>`).join('')}
+        </div>`}
+      <div class="modal-actions"><button type="button" class="secondary-button" data-close>Close</button></div>
+    </div></div>`
+  }
+
   if (type === 'employee') {
     if (state.modal.editMode) {
       const e = state.modal
@@ -673,12 +698,18 @@ function renderModal() {
       <div class="form-grid">
         ${fld('Full Name','name')}
         ${fld('Email','email','','email')}
-        ${fld('Password','password','','password')}
+        <label class="field"><span>Password</span>
+          <div style="display:flex;gap:6px">
+            <input name="password" type="password" style="flex:1">
+            <button type="button" class="secondary-button" data-action="gen-employee-password" style="white-space:nowrap">Generate</button>
+          </div>
+        </label>
         <label class="field"><span>Role</span>
           <select name="role">
             <option>Cashier</option><option>Technician</option><option>Manager</option>
           </select></label>
       </div>
+      <p class="muted" style="font-size:12px;margin-top:-6px">Share this password with the employee yourself — no invite email is sent.</p>
       ${modalActions()}
     </form></div>`
   }
@@ -1034,6 +1065,29 @@ function attachEvents() {
       navigate('/workshop'); return
     }
 
+    if (el.dataset.action === 'gen-employee-password') {
+      const input = document.querySelector('[data-form="employee"] input[name="password"]')
+      if (input) { input.type = 'text'; input.value = generateTempPassword() }
+      return
+    }
+    if (el.dataset.action === 'my-account') {
+      state.modal = { type: 'myAccount' }; render(); return
+    }
+    if (el.dataset.action === 'open-password-resets') {
+      const requests = await listPendingResetRequests()
+      state.modal = { type: 'passwordResets', requests }
+      render(); return
+    }
+    if (el.dataset.action === 'resolve-reset') {
+      const email = el.dataset.resetEmail
+      const newPass = generateTempPassword()
+      const res = await resolvePasswordReset(el.dataset.resetId, email, newPass, SESSION.employee?.name || 'Admin')
+      if (!res.ok) { alert('Error: ' + res.error); return }
+      alert(`New password for ${email}:\n\n${newPass}\n\nShare this with them directly — it won't be shown again.`)
+      const requests = await listPendingResetRequests()
+      state.modal = { type: 'passwordResets', requests }
+      render(); return
+    }
     if (el.dataset.action === 'theme') {
       state.theme = state.theme === 'dark' ? 'light' : 'dark'
       localStorage.setItem('retailos-theme', state.theme)
@@ -1398,6 +1452,18 @@ function attachEvents() {
       if (!res.ok) { alert('Error saving ticket: '+res.error); return }
       const { buildTicketSlip, printThermal } = await import('../print/print.js')
       state.modal = null; printThermal(buildTicketSlip(res.data)); await load(); return
+    }
+
+    if (type === 'change-password') {
+      const result = await handleChangePasswordSubmit(SESSION, data)
+      const errEl = document.getElementById('change-password-error')
+      if (!result.ok) {
+        if (errEl) { errEl.textContent = result.error; errEl.classList.remove('hidden') }
+        return
+      }
+      state.modal = null
+      alert('Password updated.')
+      render(); return
     }
 
     if (type === 'edit-employee') {

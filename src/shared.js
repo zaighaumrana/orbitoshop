@@ -176,6 +176,102 @@ export function validatePassword(p) {
   return null
 }
 
+export function generateTempPassword() {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%'
+  let pass = ''
+  for (let i = 0; i < 10; i++) pass += chars[Math.floor(Math.random() * chars.length)]
+  return pass
+}
+
+/** Logged-in user changes their own password (owner or employee). */
+export async function changeOwnPassword(session, oldPassword, newPassword) {
+  const err = validatePassword(newPassword)
+  if (err) return { ok: false, error: err }
+
+  if (session.isAdmin || session.employee?.role === 'Business Owner') {
+    if (oldPassword !== CFG.owner_password) return { ok: false, error: 'Current password is incorrect.' }
+    const { error } = await sb.from('shop_config').update({ owner_password: newPassword }).eq('id', 1)
+    if (error) return { ok: false, error: error.message }
+    CFG.owner_password = newPassword
+    return { ok: true }
+  }
+
+  const { data, error: findErr } = await sb.from('employees')
+    .select('id, password').eq('id', session.employee.id).single()
+  if (findErr || !data) return { ok: false, error: 'Could not find your account.' }
+  if (data.password !== oldPassword) return { ok: false, error: 'Current password is incorrect.' }
+
+  const { error } = await sb.from('employees').update({ password: newPassword }).eq('id', session.employee.id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+/** No email service is configured, so "forgot password" logs a request an admin resolves manually. */
+export async function requestPasswordReset(email) {
+  const { error } = await sb.from('password_reset_requests').insert({ email: email.toLowerCase().trim() })
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+export async function listPendingResetRequests() {
+  const { data, error } = await sb.from('password_reset_requests')
+    .select('*').eq('status', 'Pending').order('requested_at', { ascending: false })
+  if (error) { console.warn('Reset requests load failed:', error.message); return [] }
+  return data || []
+}
+
+export async function resolvePasswordReset(requestId, email, newPassword, resolvedBy) {
+  const isOwner = CFG.owner_email && email.toLowerCase() === CFG.owner_email.toLowerCase()
+  if (isOwner) {
+    const { error } = await sb.from('shop_config').update({ owner_password: newPassword }).eq('id', 1)
+    if (error) return { ok: false, error: error.message }
+    CFG.owner_password = newPassword
+  } else {
+    const { error } = await sb.from('employees').update({ password: newPassword }).eq('email', email.toLowerCase().trim())
+    if (error) return { ok: false, error: error.message }
+  }
+  const { error: reqErr } = await sb.from('password_reset_requests')
+    .update({ status: 'Resolved', resolved_at: new Date().toISOString(), resolved_by: resolvedBy || '' })
+    .eq('id', requestId)
+  if (reqErr) return { ok: false, error: reqErr.message }
+  return { ok: true }
+}
+
+/** Shared "My Account" modal — used by pos.js, workshop.js and admin.js. */
+export function myAccountModalHTML(session) {
+  const isOwnerLike = session.isAdmin || session.employee?.role === 'Business Owner'
+  return `<div class="modal-backdrop"><div class="modal" style="max-width:420px">
+    <h2>My Account</h2>
+    ${CFG.ems_enabled && !isOwnerLike ? `
+      <div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+        <p class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Employee Self-Service</p>
+        <button type="button" class="secondary-button" data-action="open-leave-request" style="width:100%">📋 Request Leave</button>
+      </div>
+    ` : ''}
+    <form data-form="change-password">
+      <p class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Change Password</p>
+      <div class="form-grid">
+        <label class="field"><span>Current Password</span><input name="oldPassword" type="password" required autocomplete="current-password"></label>
+        <label class="field"><span>New Password</span><input name="newPassword" type="password" required autocomplete="new-password"></label>
+        <label class="field"><span>Confirm New Password</span><input name="confirmPassword" type="password" required autocomplete="new-password"></label>
+      </div>
+      <div id="change-password-error" class="hidden" style="color:var(--danger);font-size:13px;margin:8px 0"></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary-button" data-close>Close</button>
+        <button class="primary-button">Update Password</button>
+      </div>
+    </form>
+  </div></div>`
+}
+
+/** Shared handler for the change-password form. Returns {ok,error}. */
+export async function handleChangePasswordSubmit(session, data) {
+  if (data.newPassword !== data.confirmPassword) {
+    return { ok: false, error: 'New passwords do not match.' }
+  }
+  return changeOwnPassword(session, data.oldPassword, data.newPassword)
+}
+
 /* ── Ticket ops ── */
 export function generateTicketNumber() {
   return `FP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`
