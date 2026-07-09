@@ -271,7 +271,7 @@ function workshopView() {
 ═══════════════════════════════════════════════════════════════════ */
 function renderModal() {
   if (!state.modal) return ''
-  const { type } = state.modal
+  const { type, id } = state.modal
 
   if (type === 'leave-request') return leaveRequestHTML()
 
