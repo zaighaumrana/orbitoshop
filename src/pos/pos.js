@@ -88,6 +88,7 @@ function render() {
     return
   }
   const tenant = currentTenant()
+  const _modalScroll = document.querySelector('.modal')?.scrollTop || 0
 
   document.getElementById('app').innerHTML = `
     <div class="app-shell client-shell">
@@ -128,6 +129,10 @@ function render() {
   if (!_eventsAttached) {
     attachEvents()
     _eventsAttached = true
+  }
+  if (_modalScroll) {
+    const m = document.querySelector('.modal')
+    if (m) m.scrollTop = _modalScroll
   }
 }
 
@@ -1221,6 +1226,16 @@ function attachEvents() {
     }
   })
 
+  /* ── Enter key submits quick-add inputs that aren't inside a <form> ── */
+  app.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return
+    const map = { 'tag-custom-text': 'confirm-custom-tag' }
+    const action = map[e.target.id]
+    if (!action) return
+    e.preventDefault()
+    document.querySelector(`[data-action="${action}"]`)?.click()
+  })
+
   /* ── Change ── */
   app.addEventListener('change', e => {
     const t = e.target
@@ -1380,6 +1395,5 @@ async function verifyAdminLocal(pin) {
 export async function initPOS(sess) {
   SESSION = sess
   state.role = sess.employee?.role || 'Cashier'
-  _eventsAttached = false  // reset so attachEvents fires once per initPOS call
   await load()
 }

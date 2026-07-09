@@ -66,13 +66,12 @@ async function load() {
   applyBranding()
 
   if (adminState.adminModule === 'ems') {
-    const { loadEMSData, emsView, attachEMSEvents, resetEMSEvents } = await import('./ems.js')
+    const { loadEMSData, emsView, attachEMSEvents } = await import('./ems.js')
     const emsData = await loadEMSData()
     adminState._emsData = emsData
     adminState._emsHTML = emsView(emsData, SESSION)
     render()
     const app = document.getElementById('app')
-    resetEMSEvents()
     attachEMSEvents(app, () => adminState._emsData, async () => {
       const fresh = await loadEMSData()
       adminState._emsData = fresh
@@ -91,6 +90,7 @@ let _eventsAttached = false
 function render() {
   const tenant = currentTenant()
   if (!can(adminState.adminModule, state.role)) adminState.adminModule = 'dashboard'
+  const _modalScroll = document.querySelector('.modal')?.scrollTop || 0
 
   document.getElementById('app').innerHTML = `
     <div class="app-shell client-shell">
@@ -138,6 +138,10 @@ function render() {
   if (!_eventsAttached) {
     attachEvents()
     _eventsAttached = true
+  }
+  if (_modalScroll) {
+    const m = document.querySelector('.modal')
+    if (m) m.scrollTop = _modalScroll
   }
 }
 
@@ -1412,6 +1416,20 @@ function attachEvents() {
     }
   })
 
+  // Enter key submits quick-add inputs that aren't inside a <form>
+  app.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return
+    const map = {
+      'new-comp-input': 'add-quick-comp',
+      'qitem-name':     'add-qitem',
+      'te-new-comp':    'te-add-comp',
+    }
+    const action = map[e.target.id]
+    if (!action) return
+    e.preventDefault()
+    document.querySelector(`[data-action="${action}"]`)?.click()
+  })
+
   // Change
   app.addEventListener('change', async e => {
     const t = e.target
@@ -1578,6 +1596,5 @@ export async function initAdmin(sess, module, query) {
   SESSION    = sess
   state.role = sess.isAdmin ? 'Business Owner' : (sess.employee?.role || 'Manager')
   if (module) adminState.adminModule = module
-  _eventsAttached = false  // reset so attachEvents fires on each module init
   await load()
 }

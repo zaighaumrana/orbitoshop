@@ -49,6 +49,7 @@ function render() {
 
   const tenant = currentTenant()
   const isAdmin = SESSION.isAdmin || state.role === 'Business Owner'
+  const _modalScroll = document.querySelector('.modal')?.scrollTop || 0
 
   document.getElementById('app').innerHTML = `
     <div class="app-shell client-shell">
@@ -101,6 +102,10 @@ function render() {
   if (!_eventsAttached) {
     attachEvents()
     _eventsAttached = true
+  }
+  if (_modalScroll) {
+    const m = document.querySelector('.modal')
+    if (m) m.scrollTop = _modalScroll
   }
 }
 
@@ -668,6 +673,14 @@ function attachEvents() {
 
   /* ── Keyboard ── */
   document.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const map = {
+        'custom-comp-name': 'add-custom-comp',
+        'custom-tag-text':  'confirm-custom-tag',
+      }
+      const action = map[e.target.id]
+      if (action) { e.preventDefault(); document.querySelector(`[data-action="${action}"]`)?.click(); return }
+    }
     if (document.getElementById('pp-display')) {
       if (e.key === 'Enter')     { e.preventDefault(); handlePpKey('✓', verifyAdminLocal, render); return }
       if (e.key === 'Backspace') { e.preventDefault(); handlePpKey('⌫', verifyAdminLocal, render); return }
@@ -704,7 +717,6 @@ async function verifyAdminLocal(pin) {
 export async function initWorkshop(sess) {
   SESSION          = sess
   state.role       = sess.isAdmin ? 'Business Owner' : (sess.employee?.role || 'Technician')
-  _eventsAttached  = false
   wsState.filter   = ''
   wsState.statusFilter = 'all'
   await load()
