@@ -15,6 +15,7 @@ const ADMIN_MODULES = [
   ['dashboard', '▦', 'Dashboard'],
   ['repairs',   '◈', 'Repair Tickets'],
   ['inventory', '▤', 'Inventory'],
+  ['catalog',   '▥', 'Catalog'],
   ['reports',   '▧', 'Reports'],
   ['employees', '♙', 'Employees'],
   ['receipts',  '◉', 'Receipts'],
@@ -25,6 +26,7 @@ const ADMIN_MODULES = [
 const adminState = {
   adminModule:      'dashboard',
   settingsTab:      'branding',
+  catalogTab:       'quickitems',
   receiptsExpanded: null,
   teLabour:         null,
   filter:           '',
@@ -146,7 +148,7 @@ function render() {
 }
 
 function pageContent() {
-  const pages = { dashboard, repairs, inventory, reports, employees, receipts, settings }
+  const pages = { dashboard, repairs, inventory, catalog, reports, employees, receipts, settings }
   if (adminState.adminModule === 'ems') {
     return adminShell(adminState._emsHTML || '<div class="empty">Loading EMS…</div>')
   }
@@ -479,16 +481,96 @@ function settings() {
   if (state.role !== 'Business Owner' && !SESSION.isAdmin)
     return `<div class="card"><p class="muted">Settings are available to Business Owner only.</p></div>`
   const t = currentTenant()
-  const tabs = { branding:'Branding', contact:'Contact', receipt:'Receipt & Tax',
-                 components:'Components', quickitems:'Quick Items', staff:'Staff & Security' }
+  const tabs = { branding:'Branding', contact:'Contact', receipt:'Receipt & Tax', staff:'Staff & Security' }
   return `
-    ${tit('Business Settings','Branding, contact, receipt, components, quick items, staff.','')}
+    ${tit('Business Settings','Branding, contact, receipt, staff.','')}
     <div class="settings-tabs">
       ${Object.entries(tabs).map(([k,l]) =>
         `<button class="settings-tab ${adminState.settingsTab===k?'active':''}" data-settings-tab="${k}">${l}</button>`
       ).join('')}
     </div>
     ${settingsTabContent()}`
+}
+
+function catalog() {
+  if (state.role !== 'Business Owner' && !SESSION.isAdmin && state.role !== 'Manager')
+    return `<div class="card"><p class="muted">Catalog is available to Managers and the Business Owner only.</p></div>`
+  const tabs = { quickitems:'Quick Items', components:'Components' }
+  return `
+    ${tit('Catalog','Quick sale items and repair components.','')}
+    <div class="settings-tabs">
+      ${Object.entries(tabs).map(([k,l]) =>
+        `<button class="settings-tab ${adminState.catalogTab===k?'active':''}" data-catalog-tab="${k}">${l}</button>`
+      ).join('')}
+    </div>
+    ${catalogTabContent()}`
+}
+
+function catalogTabContent() {
+  if (adminState.catalogTab === 'components') {
+    const comps = state.data.repairComponents || []
+    return `
+      <div class="card" style="display:grid;gap:14px">
+        <div><h2>Quick-Tap Components</h2></div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          ${comps.map((c) => `
+            <div style="display:flex;align-items:center;gap:6px;background:var(--surface-2);
+                        border:1px solid var(--border);border-radius:8px;padding:6px 10px">
+              <span style="font-size:13px">${c.name}</span>
+              <button type="button" data-remove-quick="${c.id}"
+                style="color:var(--danger);background:none;border:none;
+                       font-size:16px;line-height:1;padding:0 2px;cursor:pointer">×</button>
+            </div>`).join('')}
+        </div>
+        <div style="display:flex;gap:8px">
+          <input id="new-comp-input" class="search" placeholder="New component name" style="flex:1">
+          <button class="primary-button" data-action="add-quick-comp">Add</button>
+        </div>
+      </div>`
+  }
+
+  if (adminState.catalogTab === 'quickitems') {
+    const items = state.data.quickItems || []
+    return `
+      <div class="card" style="display:grid;gap:16px">
+        <div><h2>Quick Sale Items</h2></div>
+        ${items.map((item,i) => `
+          <div style="padding:12px;background:var(--surface-2);border-radius:8px;display:grid;gap:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <strong>${item.name}</strong>
+              <button type="button" data-remove-qitem="${i}"
+                style="color:var(--danger);background:none;border:none;font-size:18px;cursor:pointer">×</button>
+            </div>
+            <div style="font-size:13px;color:var(--muted)">
+              Prices: ${(item.prices||[]).map((p,pi) => {
+                const pv = (typeof p === 'object' && p !== null) ? p : { name:'', price:p }
+                return `
+                <span style="display:inline-flex;align-items:center;gap:4px;margin-right:6px">
+                  ${pv.name ? `<strong>${pv.name}</strong>:` : ''} ${money(pv.price)}
+                  <button type="button" data-remove-qprice="${i}-${pi}"
+                    style="color:var(--danger);background:none;border:none;font-size:14px;cursor:pointer;padding:0">×</button>
+                </span>`
+              }).join('')}
+            </div>
+            <div style="display:flex;gap:8px">
+              <input class="search" placeholder="Brand/Variant name (optional)" id="qvariant-name-${i}" style="flex:2">
+              <input type="number" step="any" min="0" placeholder="Price" id="qprice-input-${i}"
+                style="flex:1;border:1px solid var(--border);border-radius:6px;
+                       padding:7px 9px;background:var(--surface);color:var(--text)">
+              <button type="button" class="secondary-button" data-add-qprice="${i}">+ Add</button>
+            </div>
+          </div>`).join('')}
+        <button class="primary-button" data-action="open-add-quick-item">+ Add Quick Item</button>
+      </div>`
+  }
+}
+
+function qiVariantRowHTML() {
+  return `<div data-variant-row style="display:flex;gap:8px;margin-bottom:8px">
+    <input class="search" name="variantName[]" placeholder="Brand/Variant name (optional)" style="flex:2">
+    <input type="number" step="any" min="0" name="variantPrice[]" placeholder="Price" class="search" style="flex:1">
+    <button type="button" class="secondary-button" data-action="remove-variant-row" style="color:var(--danger)">×</button>
+  </div>`
 }
 
 function settingsTabContent() {
@@ -546,62 +628,6 @@ function settingsTabContent() {
       <div class="modal-actions" style="grid-column:1/-1"><button class="primary-button">Save Receipt Settings</button></div>
     </form>`
 
-  if (adminState.settingsTab === 'components') {
-    const comps = state.data.repairComponents || []
-    return `
-      <div class="card" style="display:grid;gap:14px">
-        <div><h2>Quick-Tap Components</h2></div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px">
-          ${comps.map((c) => `
-            <div style="display:flex;align-items:center;gap:6px;background:var(--surface-2);
-                        border:1px solid var(--border);border-radius:8px;padding:6px 10px">
-              <span style="font-size:13px">${c.name}</span>
-              <button type="button" data-remove-quick="${c.id}"
-                style="color:var(--danger);background:none;border:none;
-                       font-size:16px;line-height:1;padding:0 2px;cursor:pointer">×</button>
-            </div>`).join('')}
-        </div>
-        <div style="display:flex;gap:8px">
-          <input id="new-comp-input" class="search" placeholder="New component name" style="flex:1">
-          <button class="primary-button" data-action="add-quick-comp">Add</button>
-        </div>
-      </div>`
-  }
-
-  if (adminState.settingsTab === 'quickitems') {
-    const items = state.data.quickItems || []
-    return `
-      <div class="card" style="display:grid;gap:16px">
-        <div><h2>Quick Sale Items</h2></div>
-        ${items.map((item,i) => `
-          <div style="padding:12px;background:var(--surface-2);border-radius:8px;display:grid;gap:8px">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-              <strong>${item.name}</strong>
-              <button type="button" data-remove-qitem="${i}"
-                style="color:var(--danger);background:none;border:none;font-size:18px;cursor:pointer">×</button>
-            </div>
-            <div style="font-size:13px;color:var(--muted)">
-              Prices: ${(item.prices||[]).map((p,pi) => `
-                <span style="display:inline-flex;align-items:center;gap:4px;margin-right:6px">
-                  ${money(p)}
-                  <button type="button" data-remove-qprice="${i}-${pi}"
-                    style="color:var(--danger);background:none;border:none;font-size:14px;cursor:pointer;padding:0">×</button>
-                </span>`).join('')}
-            </div>
-            <div style="display:flex;gap:8px">
-              <input type="number" step="any" min="0" placeholder="Add price" id="qprice-input-${i}"
-                style="flex:1;border:1px solid var(--border);border-radius:6px;
-                       padding:7px 9px;background:var(--surface);color:var(--text)">
-              <button type="button" class="secondary-button" data-add-qprice="${i}">+ Price</button>
-            </div>
-          </div>`).join('')}
-        <div style="display:flex;gap:8px">
-          <input id="qitem-name" class="search" placeholder="Item name" style="flex:1">
-          <button class="primary-button" data-action="add-qitem">Add Item</button>
-        </div>
-      </div>`
-  }
-
   if (adminState.settingsTab === 'staff') {
     return `
       <div style="display:grid;gap:16px">
@@ -651,6 +677,21 @@ function renderModal() {
   if (type === 'pinPrompt') return `<div class="modal-backdrop">${pinPromptHTML(state.modal.purpose)}</div>`
 
   if (type === 'myAccount') return myAccountModalHTML(SESSION)
+
+  if (type === 'addQuickItem') {
+    return `<div class="modal-backdrop"><form class="modal" data-form="add-quick-item" style="max-width:480px">
+      <h2>Add Quick Item</h2>
+      <div class="form-grid">
+        ${fld('Item Name','itemName')}
+      </div>
+      <p class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;margin:14px 0 6px">
+        Variants (brand/name optional, price required)
+      </p>
+      <div id="qi-variant-rows">${qiVariantRowHTML()}</div>
+      <button type="button" class="secondary-button" data-action="add-variant-row">+ Add Another Variant</button>
+      ${modalActions()}
+    </form></div>`
+  }
 
   if (type === 'passwordResets') {
     const reqs = state.modal.requests || []
@@ -1036,7 +1077,7 @@ function attachEvents() {
 
     const el = e.target.closest(
       'button,[data-modal],[data-close],[data-action],[data-comp],[data-remove-comp],' +
-      '[data-settings-tab],[data-kpi-target],[data-pp-key],[data-te-remove],' +
+      '[data-settings-tab],[data-catalog-tab],[data-kpi-target],[data-pp-key],[data-te-remove],' +
       '[data-remove-quick],[data-remove-qitem],[data-add-qprice],[data-remove-qprice],' +
       '[data-inv-edit],[data-inv-delete],[data-settle-id],[data-view-ticket]'
     )
@@ -1057,7 +1098,16 @@ function attachEvents() {
       return
     }
 
-    if (el.dataset.settingsTab) { adminState.settingsTab = el.dataset.settingsTab; render(); return }
+    if (el.dataset.settingsTab) {
+      const { navigate } = await import('../router.js')
+      navigate(`/admin/settings?tab=${el.dataset.settingsTab}`, { replace: true, force: true })
+      return
+    }
+    if (el.dataset.catalogTab) {
+      const { navigate } = await import('../router.js')
+      navigate(`/admin/catalog?tab=${el.dataset.catalogTab}`, { replace: true, force: true })
+      return
+    }
     if (el.dataset.modal) { state.modal = { type:el.dataset.modal, id:el.dataset.id }; render(); return }
 
     if (el.dataset.action === 'go-pos') {
@@ -1072,6 +1122,17 @@ function attachEvents() {
     if (el.dataset.action === 'gen-employee-password') {
       const input = document.querySelector('[data-form="employee"] input[name="password"]')
       if (input) { input.type = 'text'; input.value = generateTempPassword() }
+      return
+    }
+    if (el.dataset.action === 'open-add-quick-item') {
+      state.modal = { type: 'addQuickItem' }; render(); return
+    }
+    if (el.dataset.action === 'add-variant-row') {
+      document.getElementById('qi-variant-rows')?.insertAdjacentHTML('beforeend', qiVariantRowHTML())
+      return
+    }
+    if (el.dataset.action === 'remove-variant-row') {
+      el.closest('[data-variant-row]')?.remove()
       return
     }
     if (el.dataset.action === 'my-account') {
@@ -1108,6 +1169,7 @@ function attachEvents() {
     if (el.dataset.action === 'go-employees-tab') {
       adminState.adminModule = 'employees'
       adminState.settingsTab = 'branding'
+      adminState.catalogTab  = 'quickitems'
       const { navigate } = await import('../router.js')
       navigate('/admin/employees'); return
     }
@@ -1238,7 +1300,7 @@ function attachEvents() {
         receiptNo: `INV-${sale.id}`, date: sale.created_at,
         cashier: sale.employee_name||'Counter', customer: sale.customer_name||'Walk-in',
         items: (sale.items_sold||[]).map(i => ({
-          name:i.name, qty:i.qty||1, soldPrice:i.sold_price||i.soldPrice||0,
+          name:i.name, variantName:i.variant_name||'', qty:i.qty||1, soldPrice:i.sold_price||i.soldPrice||0,
           originalPrice:i.original_price||0, discount:i.discount||0, reason:i.reason||''
         })),
         labour:sale.labour_cost||0, discount:sale.discount||0, tax:sale.tax||0,
@@ -1327,9 +1389,10 @@ function attachEvents() {
       const idx  = Number(el.dataset.addQprice)
       const val  = Number(document.getElementById(`qprice-input-${idx}`)?.value)
       if (!val || val <= 0) return
+      const variantName = document.getElementById(`qvariant-name-${idx}`)?.value?.trim() || ''
       const item = (state.data.quickItems||[])[idx]
       if (!item) return
-      const newPrices = [...(item.prices||[]), val]
+      const newPrices = [...(item.prices||[]), { name: variantName, price: val }]
       const { error } = await sb.from('quick_items').update({ prices: newPrices }).eq('id', item.id)
       if (error) { alert('Error: '+error.message); return }
       await load(); return
@@ -1419,9 +1482,14 @@ function attachEvents() {
   // Enter key submits quick-add inputs that aren't inside a <form>
   app.addEventListener('keydown', e => {
     if (e.key !== 'Enter') return
+    if (e.target.id?.startsWith('qprice-input-')) {
+      e.preventDefault()
+      const idx = e.target.id.replace('qprice-input-', '')
+      document.querySelector(`[data-add-qprice="${idx}"]`)?.click()
+      return
+    }
     const map = {
       'new-comp-input': 'add-quick-comp',
-      'qitem-name':     'add-qitem',
       'te-new-comp':    'te-add-comp',
     }
     const action = map[e.target.id]
@@ -1470,6 +1538,21 @@ function attachEvents() {
       if (!res.ok) { alert('Error saving ticket: '+res.error); return }
       const { buildTicketSlip, printThermal } = await import('../print/print.js')
       state.modal = null; printThermal(buildTicketSlip(res.data)); await load(); return
+    }
+
+    if (type === 'add-quick-item') {
+      const itemName = data.itemName?.trim()
+      if (!itemName) { alert('Item name is required.'); return }
+      const names  = [...form.querySelectorAll('[name="variantName[]"]')].map(i => i.value.trim())
+      const prices = [...form.querySelectorAll('[name="variantPrice[]"]')].map(i => Number(i.value) || 0)
+      const variants = names.map((name, i) => ({ name, price: prices[i] })).filter(v => v.price > 0)
+      const { error } = await sb.from('quick_items').insert({
+        name: itemName, prices: variants,
+        sort_order: (state.data.quickItems||[]).length + 1
+      })
+      if (error) { alert('Error: ' + error.message); return }
+      state.modal = null
+      await load(); return
     }
 
     if (type === 'change-password') {
@@ -1596,5 +1679,7 @@ export async function initAdmin(sess, module, query) {
   SESSION    = sess
   state.role = sess.isAdmin ? 'Business Owner' : (sess.employee?.role || 'Manager')
   if (module) adminState.adminModule = module
+  if (module === 'settings' && query?.tab) adminState.settingsTab = query.tab
+  if (module === 'catalog'  && query?.tab) adminState.catalogTab  = query.tab
   await load()
 }

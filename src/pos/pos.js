@@ -177,6 +177,7 @@ function posView() {
           <div class="cart-line">
             <div>
               <strong>${item.name}</strong><br>
+              ${item.variantName ? `<small class="muted">&nbsp;&nbsp;${item.variantName}</small><br>` : ''}
               <small class="muted">
                 ${item.isTicket ? '' : money(item.soldPrice) + ' each'}
                 ${item.reason?' · '+item.reason:''}
@@ -632,11 +633,11 @@ function renderModal() {
 
   if (type === 'receipt') return `<div class="modal-backdrop">
     <div class="modal">
-      <h2>${state.modal.isTicketSlip ? 'Repair Ticket' : 'Receipt'}</h2>
-      ${receiptPreview(state.modal.sale)}
+      <h2>${state.modal.isTicketSlip ? 'Repair Ticket Created' : 'Receipt'}</h2>
+      ${state.modal.isTicketSlip ? ticketSlipPreview(state.modal.ticket) : receiptPreview(state.modal.sale)}
       <div class="modal-actions">
         <button class="secondary-button" data-close>Close</button>
-        <button class="primary-button" data-action="print-receipt">Print / Save PDF</button>
+        <button class="primary-button" data-action="${state.modal.isTicketSlip ? 'print-ticket-slip' : 'print-receipt'}">Print Receipt</button>
       </div>
     </div></div>`
 
@@ -730,7 +731,7 @@ function renderModal() {
     return `<div class="modal-backdrop"><div class="modal" style="max-width:340px">
       <h2>${name}</h2><p class="muted">Select price:</p>
       <div style="display:grid;gap:8px;margin-top:8px">
-        ${(prices||[]).map((p,i)=>`<button class="secondary-button" style="font-size:16px;min-height:48px" data-pick-price="${i}">${money(p)}</button>`).join('')}
+        ${(prices||[]).map((p,i)=>`<button class="secondary-button" style="font-size:16px;min-height:48px" data-pick-price="${i}">${p.name ? `${p.name} — ${money(p.price)}` : money(p.price)}</button>`).join('')}
       </div>
       <div class="modal-actions"><button class="secondary-button" data-close>Cancel</button></div>
     </div></div>`
@@ -749,12 +750,39 @@ function receiptPreview(sale) {
     Receipt: ${sale.receiptNo||'—'}<br>Date: ${sale.date?new Date(sale.date).toLocaleString():new Date().toLocaleString()}<br>
     Cashier: ${sale.cashier||'Counter'}<br>Customer: ${sale.customer||'Walk-in'}
     <hr>
-    ${(sale.items||[]).map(i=>`${i.name}<br><small>${i.qty||1} × ${money(i.soldPrice||0)}${i.discount>0?` (disc ${money(i.discount)})`:''}</small>`).join('<br>')}
+    ${(sale.items||[]).map(i=>`${i.name}<br>${i.variantName?`&nbsp;&nbsp;${i.variantName} — ${money(i.soldPrice*(i.qty||1))}<br>`:''}<small>${i.qty||1} × ${money(i.soldPrice||0)}${i.discount>0?` (disc ${money(i.discount)})`:''}</small>`).join('<br>')}
     <hr>
     ${sale.discount>0?`Discount: ${money(sale.discount)}<br>`:''}
     ${sale.tax>0?`Tax: ${money(sale.tax)}<br>`:''}
     <strong>Total: ${money(sale.total)}</strong><br>Payment: ${sale.payment||'—'}
     ${sale.payment==='Cash'&&sale.cashTendered>0?`<br>Cash Received: <strong>${money(sale.cashTendered)}</strong><br>Change Given: <strong>${money(sale.changeGiven||0)}</strong>`:''}
+    <hr>
+    <center>${t.receiptFooter||''}</center>
+  </div>`
+}
+
+function ticketSlipPreview(ticket) {
+  if (!ticket) return ''
+  const t = currentTenant()
+  const comps = ticket.components_noted || []
+  return `<div class="receipt-preview">
+    <center>${t.logo?`<img src="${t.logo}" style="max-width:120px;max-height:44px;object-fit:contain;margin-bottom:6px"><br>`:''}
+    <strong>${t.name}</strong><br>${t.address||''}<br>${t.phone||''}</center>
+    <hr>
+    <center><strong>REPAIR TICKET</strong><br>${ticket.ticket_number}</center>
+    <hr>
+    Customer: ${ticket.customer_name}<br>
+    Phone: ${ticket.customer_phone}<br>
+    Device: ${ticket.device_brand} ${ticket.device_model}<br>
+    ${ticket.imei ? `IMEI: <small>${ticket.imei}</small><br>` : ''}
+    Date: ${new Date(ticket.created_at||Date.now()).toLocaleString()}
+    <hr>
+    <strong>Issues Noted:</strong><br>
+    ${comps.length ? comps.map(c => `· ${c.name}${c.condition?` (${c.condition})`:''}${Number(c.price)>0?` — ${money(c.price)}`:''}`).join('<br>') : 'No components noted.'}
+    <hr>
+    ${ticket.technician_note ? `<strong>Technician Note:</strong><br>${ticket.technician_note}<hr>` : ''}
+    Estimated Quote: <strong>${money(ticket.estimated_quote)}</strong><br>
+    ${Number(ticket.advance_payment)>0 ? `Advance Paid: <strong>${money(ticket.advance_payment)}</strong>${ticket.advance_method?` (${ticket.advance_method})`:''}<br>` : ''}
     <hr>
     <center>${t.receiptFooter||''}</center>
   </div>`
@@ -836,14 +864,12 @@ async function placeOrder() {
 
     await logBillEvent()
 
-    const { buildTicketSlip, printThermal } = await import('../print/print.js')
-    printThermal(buildTicketSlip(data))
-
     posState.cart = posState.cart.filter(i => !i.isTicket)
     posState.cartTicketId = null
     posState.cartIsNewTicket = false
     await load()
-    alert(`Order placed. Ticket ${ticketNumber} created.`)
+    state.modal = { type:'receipt', isTicketSlip:true, ticket: data }
+    render()
     return
   }
 
@@ -897,7 +923,7 @@ async function doCheckout() {
   const { data:saleData, error:saleErr } = await sb.from('sales').insert({
     ticket_id:      null,
     customer_name:  posState.udharName||'',
-    items_sold:     posState.cart.map(i=>({ name:i.name, qty:i.qty, original_price:i.originalPrice, sold_price:i.soldPrice, discount:i.discount, reason:i.reason||'' })),
+    items_sold:     posState.cart.map(i=>({ name:i.name, variant_name:i.variantName||'', qty:i.qty, original_price:i.originalPrice, sold_price:i.soldPrice, discount:i.discount, reason:i.reason||'' })),
     discount,
     tax,
     total_bill:     Math.max(0,total),
@@ -1005,6 +1031,13 @@ function attachEvents() {
       }
       return
     }
+    if (el.dataset.action === 'print-ticket-slip') {
+      if (state.modal?.ticket) {
+        const { buildTicketSlip, printThermal } = await import('../print/print.js')
+        printThermal(buildTicketSlip(state.modal.ticket))
+      }
+      return
+    }
 
     /* ── Repair collection modal ── */
     if (el.dataset.action === 'open-repair-collection') {
@@ -1093,17 +1126,19 @@ function attachEvents() {
 
     /* ── Quick items ── */
     if (el.dataset.qitemName) {
-      const prices = JSON.parse(el.dataset.qitemPrices||'[]'), name = el.dataset.qitemName
+      const raw = JSON.parse(el.dataset.qitemPrices||'[]'), name = el.dataset.qitemName
+      const prices = raw.map(p => (typeof p === 'object' && p !== null) ? p : { name:'', price:p })
       if (prices.length === 1) {
-        posState.cart.push({ productId:`qi-${name}-${Date.now()}`, name, qty:1, originalPrice:prices[0], soldPrice:prices[0], discount:0, reason:'' })
+        const pv = prices[0]
+        posState.cart.push({ productId:`qi-${name}-${Date.now()}`, name, variantName: pv.name||'', qty:1, originalPrice:pv.price, soldPrice:pv.price, discount:0, reason:'' })
         render()
       } else { state.modal = { type:'qitem-pick', name, prices }; render() }
       return
     }
     if (el.dataset.pickPrice !== undefined) {
       const { name, prices } = state.modal
-      const price = prices[Number(el.dataset.pickPrice)]
-      posState.cart.push({ productId:`qi-${name}-${Date.now()}`, name, qty:1, originalPrice:price, soldPrice:price, discount:0, reason:'' })
+      const pv = prices[Number(el.dataset.pickPrice)]
+      posState.cart.push({ productId:`qi-${name}-${Date.now()}`, name, variantName: pv.name||'', qty:1, originalPrice:pv.price, soldPrice:pv.price, discount:0, reason:'' })
       state.modal = null; render(); return
     }
 

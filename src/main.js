@@ -48,7 +48,7 @@ function setupRoutes(SESSION) {
     initWorkshop(SESSION)
   })
 
-  const adminModules = ['dashboard','repairs','inventory','reports','employees','receipts','ems','settings']
+  const adminModules = ['dashboard','repairs','inventory','reports','employees','receipts','ems','settings','catalog']
   adminModules.forEach(mod => {
     registerRoute(`/admin/${mod}`, async (params, query) => {
       const { initAdmin } = await import('./admin/admin.js')

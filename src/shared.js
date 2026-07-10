@@ -143,8 +143,8 @@ export const statusBadge = s => {
 
 /* ── Access control ── */
 export const ACCESS = {
-  'Business Owner': ['dashboard','repairs','inventory','reports','receipts','employees','ems','settings','pos','workshop'],
-  'Manager':        ['dashboard','repairs','inventory','reports','receipts','employees','ems'],
+  'Business Owner': ['dashboard','repairs','inventory','reports','receipts','employees','ems','settings','catalog','pos','workshop'],
+  'Manager':        ['dashboard','repairs','inventory','reports','receipts','employees','ems','catalog'],
   'Cashier':        ['pos'],
   'Technician':     ['workshop'],
 }
