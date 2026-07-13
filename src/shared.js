@@ -168,6 +168,49 @@ export async function verifyLogin(email, password) {
   return { ok: true, employee: { id: data.id, name: data.name, role: data.role, email: data.email } }
 }
 
+function _datePart() {
+  const d = new Date()
+  const yyyy = d.getFullYear()
+  const mm   = String(d.getMonth()+1).padStart(2,'0')
+  const dd   = String(d.getDate()).padStart(2,'0')
+  return `${yyyy}${mm}${dd}`
+}
+
+/** Real, sequential, admin-configurable invoice number. Used for both plain
+ *  POS sale receipts and repair ticket invoices — one shared sequence. */
+export async function generateInvoiceNumber() {
+  const { data: seq, error } = await sb.rpc('next_invoice_seq')
+  if (error) { console.warn('next_invoice_seq failed, falling back:', error.message) }
+  const n = error ? Date.now() % 10000 : seq
+  return `${CFG.invoice_prefix||'INV'}${_datePart()}${String(n).padStart(4,'0')}`
+}
+
+/** Separate sequence, purely for the technician-facing ticket reference —
+ *  does not represent money and is never shown as the primary number. */
+export async function generateTicketNumber() {
+  const { data: seq, error } = await sb.rpc('next_ticket_seq')
+  if (error) { console.warn('next_ticket_seq failed, falling back:', error.message) }
+  const n = error ? Date.now() % 10000 : seq
+  return `${CFG.ticket_prefix||'TK'}${_datePart()}${String(n).padStart(4,'0')}`
+}
+
+/** Search box helper — staff only ever type the numeric part; the prefix
+ *  configured in Settings is stripped automatically before matching. */
+export function matchesInvoiceSearch(fullNumber, query, prefix) {
+  const q = (query||'').trim().toUpperCase()
+  if (!q) return true
+  const full = (fullNumber||'').toUpperCase()
+  if (full === q) return true
+  if (/^\d+$/.test(q)) {
+    const p = (prefix||'').toUpperCase()
+    const digitsOnly = full.startsWith(p) ? full.slice(p.length) : full.replace(/^[A-Z]+/, '')
+    if (digitsOnly === q) return true
+    if (q.length >= 6 && digitsOnly.endsWith(q)) return true
+    return false
+  }
+  return full.includes(q)
+}
+
 export function validatePassword(p) {
   if (!p || p.length < 8)      return 'At least 8 characters required.'
   if (!/[A-Za-z]/.test(p))     return 'Must contain at least one letter.'
@@ -273,13 +316,12 @@ export async function handleChangePasswordSubmit(session, data) {
 }
 
 /* ── Ticket ops ── */
-export function generateTicketNumber() {
-  return `FP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`
-}
-
 export async function createTicket(payload, employeeName) {
+  const ticketNo  = await generateTicketNumber()
+  const invoiceNo = await generateInvoiceNumber()
   const { data, error } = await sb.from('tickets').insert({
-    ticket_number:    generateTicketNumber(),
+    ticket_number:    ticketNo,
+    invoice_number:   invoiceNo,
     customer_name:    payload.customerName   || '',
     customer_phone:   payload.customerPhone  || '',
     device_brand:     payload.deviceBrand    || '',
@@ -292,6 +334,7 @@ export async function createTicket(payload, employeeName) {
     status:           'Pending',
     technician_note:  payload.technicianNote || '',
     created_by:       employeeName           || 'Counter',
+    is_locked:        true,
   }).select().single()
   if (error) return { ok: false, error: error.message }
   return { ok: true, data }
@@ -308,6 +351,81 @@ export async function updateTicket(id, updates) {
   if (updates.actual_quote   !== undefined) mapped.actual_quote     = updates.actual_quote
   if (updates.labour_cost    !== undefined) mapped.labour_cost      = updates.labour_cost
   const { error } = await sb.from('tickets').update(mapped).eq('id', id)
+  if (error) return { ok: false, error: error.message }
+  return { ok: true }
+}
+
+/** All sub-invoices that already exist under a parent ticket, oldest first. */
+export async function getSubInvoices(parentId) {
+  const { data, error } = await sb.from('tickets')
+    .select('*').eq('parent_ticket_id', parentId).order('created_at', { ascending: true })
+  if (error) { console.warn('getSubInvoices failed:', error.message); return [] }
+  return data || []
+}
+
+/**
+ * Creates a sub-invoice under a locked parent ticket. Never touches the
+ * parent's own components/labour/quote. Automatically credits whatever is
+ * left of the parent's advance payment (after accounting for any earlier
+ * sub-invoices that already drew on it) against this new sub's total.
+ */
+export async function createSubInvoice(parentTicket, components, labourCost, note, employeeName) {
+  const existingSubs = await getSubInvoices(parentTicket.id)
+  const suffix = String.fromCharCode(65 + existingSubs.length) // A, B, C, ...
+
+  const componentsTotal = (components||[]).reduce((s,c) => s + Number(c.price||0), 0)
+  const total = componentsTotal + Number(labourCost||0)
+
+  const alreadyCredited = existingSubs.reduce((sum, s) =>
+    sum + (s.payment_history||[])
+      .filter(p => p.type === 'advance_credit')
+      .reduce((a,p) => a + Number(p.amount||0), 0)
+  , 0)
+  const remainingAdvance = Math.max(0, Number(parentTicket.advance_payment||0) - alreadyCredited)
+  const creditApplied    = Math.min(remainingAdvance, total)
+  const balanceDue       = Math.max(0, total - creditApplied)
+
+  const paymentHistory = creditApplied > 0
+    ? [{ type:'advance_credit', amount:creditApplied, date:new Date().toISOString(), note:'Credited from original advance payment' }]
+    : []
+
+  const { data, error } = await sb.from('tickets').insert({
+    parent_ticket_id:  parentTicket.id,
+    invoice_number:    `${parentTicket.invoice_number}-${suffix}`,
+    ticket_number:      `${parentTicket.ticket_number}-${suffix}`,
+    customer_name:      parentTicket.customer_name,
+    customer_phone:     parentTicket.customer_phone,
+    device_brand:       parentTicket.device_brand,
+    device_model:       parentTicket.device_model,
+    imei:               parentTicket.imei,
+    components_noted:   components || [],
+    labour_cost:        Number(labourCost||0),
+    estimated_quote:    total,
+    final_total:        total,
+    amount_paid:        creditApplied,
+    balance_due:        balanceDue,
+    payment_history:    paymentHistory,
+    technician_note:    note || '',
+    status:              'Pending',
+    is_locked:           true,
+    created_by:          employeeName || 'Technician',
+  }).select().single()
+
+  if (error) return { ok: false, error: error.message }
+  return { ok: true, data, creditApplied }
+}
+
+/**
+ * The ONE allowed mutation to a locked ticket's original components — marks
+ * one component as not needed (e.g. turned out to just need cleaning).
+ * Never deletes it; the parent keeps showing the full original list with
+ * the reason attached. Caller is responsible for PIN-gating this first.
+ */
+export async function markComponentNotNeeded(ticketId, componentsNoted, index, reason, employeeName) {
+  const updated = [...componentsNoted]
+  if (!updated[index]) return { ok: false, error: 'Component not found.' }
+  updated[index] = { ...updated[index], removed: true, removedReason: reason||'', removedBy: employeeName||'' }
+  const { error } = await sb.from('tickets').update({ components_noted: updated }).eq('id', ticketId)
   if (error) return { ok: false, error: error.message }
   return { ok: true }
 }
@@ -348,6 +466,7 @@ export function pinPromptHTML(purpose) {
     return:   'Admin PIN to process return',
     discount: 'PIN required to apply discount',
     udhar:    'PIN required for credit sale',
+    'remove-component': 'Owner/Admin PIN required',
   }[purpose] || 'Verify identity'
   return `
     <div class="modal" style="max-width:340px">
@@ -387,8 +506,10 @@ async function _submitPp(verifyFn, renderFn) {
   ppSubmitting = false
   if (res.ok) {
     state.modal = null
+    // Pass verified=true explicitly — callback must check this
     if (ppCallback) await ppCallback(true)
   } else {
+    // Never call ppCallback on failure
     const errEl   = document.getElementById('pp-error')
     const display = document.getElementById('pp-display')
     if (errEl)   errEl.classList.remove('hidden')

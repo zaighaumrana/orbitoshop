@@ -27,8 +27,9 @@ export function buildTicketSlip(ticket) {
     <div class="c sm">${CFG.shop_phone||''}</div>
     <div class="ln"></div>
     <div class="c b">REPAIR TICKET</div>
-    <div class="c lg">${ticket.ticket_number}</div>
-    <div class="bw"><svg class="bc" data-val="${ticket.ticket_number}"></svg></div>
+    <div class="c lg">${ticket.invoice_number||ticket.ticket_number}</div>
+    <div class="c sm">Ticket: ${ticket.ticket_number}</div>
+    <div class="bw"><svg class="bc" data-val="${ticket.invoice_number||ticket.ticket_number}"></svg></div>
     <div class="ln"></div>
     <div class="row"><span>Customer</span><span>${ticket.customer_name}</span></div>
     <div class="row"><span>Phone</span><span>${ticket.customer_phone}</span></div>
@@ -71,6 +72,7 @@ export function buildReceiptSlip(sale, isReprint = false) {
     <div class="row"><span>Date</span><span>${new Date(sale.date||Date.now()).toLocaleDateString()}</span></div>
     ${sale.customer ? `<div class="row"><span>Customer</span><span>${sale.customer}</span></div>` : ''}
     ${sale.cashier  ? `<div class="row"><span>Cashier</span><span>${sale.cashier}</span></div>`  : ''}
+    <div class="ln"></div>
     ${items.map(i => `
       <div class="row"><span>${i.name}</span>${i.variantName ? '' : `<span>${money(i.soldPrice*i.qty)}</span>`}</div>
       ${i.variantName ? `<div class="row"><span>&nbsp;&nbsp;${i.variantName}</span><span>${money(i.soldPrice*i.qty)}</span></div>` : ''}
@@ -89,6 +91,35 @@ export function buildReceiptSlip(sale, isReprint = false) {
     <div class="c sm">${CFG.terms_text||'Thank you for your business.'}</div>`
 }
 
+export function buildSubInvoiceSlip(sub, parentTicket) {
+  const comps = sub.components_noted || []
+  return `
+    ${CFG.shop_logo ? `<div class="c"><img src="${CFG.shop_logo}" style="max-width:140px;max-height:50px;object-fit:contain"></div>` : ''}
+    <div class="c b lg">${CFG.shop_name||'Repair Shop'}</div>
+    <div class="c sm">${CFG.shop_address||''}</div>
+    <div class="c sm">${CFG.shop_phone||''}</div>
+    <div class="ln"></div>
+    <div class="c b">SUB-INVOICE</div>
+    <div class="c lg">${sub.invoice_number}</div>
+    <div class="c sm">Linked to: ${parentTicket.invoice_number}</div>
+    <div class="bw"><svg class="bc" data-val="${sub.invoice_number}"></svg></div>
+    <div class="ln"></div>
+    <div class="row"><span>Customer</span><span>${sub.customer_name}</span></div>
+    <div class="row"><span>Device</span><span>${sub.device_brand} ${sub.device_model}</span></div>
+    <div class="row"><span>Date</span><span>${new Date(sub.created_at||Date.now()).toLocaleDateString()}</span></div>
+    <div class="ln"></div>
+    <div class="b">Additional Work:</div>
+    ${comps.length ? comps.map(c => `<div class="row"><span>· ${c.name}</span><span class="sm">${Number(c.price)>0?money(c.price):''}</span></div>`).join('') : '<div class="sm">No additional components.</div>'}
+    <div class="ln"></div>
+    ${Number(sub.labour_cost)>0 ? `<div class="row"><span>Labour Fee</span><span>${money(sub.labour_cost)}</span></div>` : ''}
+    <div class="row b"><span>Sub-Invoice Total</span><span>${money(sub.estimated_quote)}</span></div>
+    ${Number(sub.amount_paid)>0 ? `<div class="row"><span>Applied (advance credit)</span><span>${money(sub.amount_paid)}</span></div>` : ''}
+    <div class="row b lg"><span>Balance Due</span><span>${money(sub.balance_due)}</span></div>
+    <div class="ln"></div>
+    ${sub.technician_note ? `<div class="sm">Note: ${sub.technician_note}</div><div class="ln"></div>` : ''}
+    <div class="c sm">${CFG.terms_text||'Thank you for your business.'}</div>`
+}
+
 export function buildReturnSlip(data) {
   return `
     <div class="c b lg">${CFG.shop_name||'Retail Shop'}</div>
@@ -96,7 +127,7 @@ export function buildReturnSlip(data) {
     <div class="ln"></div>
     <div class="c b">RETURN / REFUND</div>
     <div class="ln"></div>
-    <div class="row"><span>Original Invoice</span><span>INV-${data.saleId}</span></div>
+    <div class="row"><span>Original Invoice</span><span>${data.invoiceNumber}</span></div>
     <div class="row"><span>Date</span><span>${new Date().toLocaleDateString()}</span></div>
     <div class="ln"></div>
     ${data.items.map(i => `<div class="row"><span>${i.name} × ${i.qty}</span><span>${money(i.sold_price*i.qty)}</span></div>`).join('')}

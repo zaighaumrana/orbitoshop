@@ -8,6 +8,8 @@ import {
   logBillEvent, logInventoryEvent,
   myAccountModalHTML, handleChangePasswordSubmit,
   generateTempPassword, listPendingResetRequests, resolvePasswordReset,
+  matchesInvoiceSearch,
+  getSubInvoices, createSubInvoice, markComponentNotNeeded,
 } from '../shared.js'
 
 
@@ -28,7 +30,6 @@ const adminState = {
   settingsTab:      'branding',
   catalogTab:       'quickitems',
   receiptsExpanded: null,
-  teLabour:         null,
   filter:           '',
   receiptDateFrom:  '',
   receiptDateTo:    '',
@@ -207,7 +208,7 @@ function dashboard() {
           <thead><tr><th>Invoice</th><th>Customer</th><th>Payment</th><th>Total</th></tr></thead>
           <tbody>
             ${sales.slice(0,8).map(s => `<tr>
-              <td>INV-${s.id}</td>
+              <td>${s.invoice_number||`INV-${s.id}`}</td>
               <td>${s.customer_name||'Walk-in'}</td>
               <td>${s.payment_method}</td>
               <td>${money(s.total_bill)}</td>
@@ -355,7 +356,7 @@ function reports() {
         <thead><tr><th>Invoice</th><th>Customer</th><th>Items</th><th>Payment</th><th>Total</th><th>Date</th><th></th></tr></thead>
         <tbody>
           ${sales.slice(0,15).map(s => `<tr>
-            <td>INV-${s.id}</td>
+            <td>${s.invoice_number||`INV-${s.id}`}</td>
             <td>${s.customer_name||'Walk-in'}</td>
             <td>${(s.items_sold||[]).length} item(s)</td>
             <td>${s.payment_method}</td>
@@ -419,10 +420,11 @@ function receipts() {
   const filtered = allSales.filter(s => {
     const matchText = (`${s.customer_name||''} ${s.payment_method||''} ${s.employee_name||''}`)
       .toLowerCase().includes(search.toLowerCase())
+    const matchInvoice = matchesInvoiceSearch(s.invoice_number||'', search, CFG.invoice_prefix) && search.trim() !== ''
     const sDate     = (s.created_at||'').slice(0,10)
     const matchFrom = !dateFrom || sDate >= dateFrom
     const matchTo   = !dateTo   || sDate <= dateTo
-    return matchText && matchFrom && matchTo
+    return (matchText || matchInvoice) && matchFrom && matchTo
   })
 
   return `
@@ -458,7 +460,7 @@ function receipts() {
             data-action="open-receipt-modal" data-receipt-idx="${idx}">
             <strong>${s.customer_name||'Walk-in'}</strong><br>
             <span class="muted" style="font-size:12px">
-              INV-${s.id} · ${s.payment_method} · ${s.employee_name||''}
+              ${s.invoice_number||`INV-${s.id}`} · ${s.payment_method} · ${s.employee_name||''}
             </span>
           </div>
           <div style="text-align:right;flex-shrink:0;display:flex;align-items:center;gap:10px">
@@ -623,6 +625,13 @@ function settingsTabContent() {
     <form class="card form-grid" data-form="settings">
       ${fld('Currency Symbol','currency',t.currency)}
       ${fld('Tax Rate %','taxRate',t.taxRate,'number')}
+      ${fld('Invoice Prefix','invoicePrefix',CFG.invoice_prefix||'INV')}
+      ${fld('Ticket Prefix','ticketPrefix',CFG.ticket_prefix||'TK')}
+      <p class="muted" style="grid-column:1/-1;font-size:12px;margin-top:-6px">
+        Full numbers look like <strong>${CFG.invoice_prefix||'INV'}20260712 0001</strong> and
+        <strong>${CFG.ticket_prefix||'TK'}20260712 0001</strong> — date stamped automatically,
+        sequence number never resets or repeats.
+      </p>
       <label class="field" style="grid-column:1/-1"><span>Receipt Footer</span>
         <textarea name="receiptFooter">${t.receiptFooter}</textarea></label>
       <div class="modal-actions" style="grid-column:1/-1"><button class="primary-button">Save Receipt Settings</button></div>
@@ -776,11 +785,28 @@ function renderModal() {
       ${tk.technician_note ? `<div style="background:color-mix(in srgb,var(--warning) 10%,var(--surface));border-left:3px solid var(--warning);padding:10px 14px;border-radius:0 8px 8px 0;margin-bottom:12px;font-size:14px"><strong>Note:</strong> ${tk.technician_note}</div>` : ''}
       ${(tk.components_noted||[]).length ? `
         <div style="display:grid;gap:6px;margin-bottom:12px">
-          ${tk.components_noted.map(c => `
-            <div style="display:flex;justify-content:space-between;padding:8px 12px;background:var(--surface-2);border-radius:8px;font-size:14px">
-              <span><strong>${c.name}</strong> <span class="badge warn" style="font-size:11px">${c.condition||''}</span></span>
-              <span>${c.price>0 ? money(c.price) : '<span class="muted">Not priced</span>'}</span>
+          ${tk.components_noted.map((c,i) => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--surface-2);border-radius:8px;font-size:14px;${c.removed?'opacity:.55':''}">
+              <span>
+                <strong style="${c.removed?'text-decoration:line-through':''}">${c.name}</strong>
+                <span class="badge warn" style="font-size:11px">${c.tag||c.condition||''}</span>
+                ${c.removed ? `<br><span class="muted" style="font-size:11px">Not needed: ${c.removedReason||''}</span>` : ''}
+              </span>
+              <span style="display:flex;align-items:center;gap:8px">
+                <span>${c.price>0 ? money(c.price) : '<span class="muted">Not priced</span>'}</span>
+                ${!c.removed ? `<button type="button" class="secondary-button" style="font-size:11px;padding:4px 8px" data-mark-not-needed="${i}">Not Needed</button>` : ''}
+              </span>
             </div>`).join('')}
+        </div>` : ''}
+      ${(state.modal.subInvoices||[]).length ? `
+        <div style="margin-bottom:12px">
+          <strong style="font-size:13px">Sub-Invoices</strong>
+          <div style="display:grid;gap:6px;margin-top:6px">
+            ${state.modal.subInvoices.map(s => `
+              <div style="display:flex;justify-content:space-between;font-size:12px;padding:8px 10px;background:var(--surface-2);border-radius:6px">
+                <span>${s.invoice_number}</span><span>${money(s.estimated_quote)} · Bal: ${money(s.balance_due)}</span>
+              </div>`).join('')}
+          </div>
         </div>` : ''}
       <div style="border-top:1px solid var(--border);padding-top:12px">
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -796,52 +822,124 @@ function renderModal() {
       </div>
       <div class="modal-actions">
         <button class="secondary-button" data-close>Close</button>
+        <button class="secondary-button" data-action="open-create-sub-invoice" data-ticket-id="${tk.id}">+ Create Sub-Invoice</button>
         <button class="primary-button" data-action="save-ticket-detail" data-id="${tk.id}">Save Update</button>
       </div>
     </div></div>`
   }
 
-  if (type === 'ticket-editor') {
-    const tk = (state.data.tickets||[]).find(t => String(t.id) === String(id))
-    if (!tk) return ''
-    const comps      = tk.components_noted || []
-    const partsTotal = comps.reduce((s,c) => s+Number(c.price||0), 0)
-    const labourVal  = adminState.teLabour ?? Math.max(0, Number(tk.estimated_quote||0)-partsTotal)
-    return `<div class="modal-backdrop" id="ticket-editor-backdrop">
-      <div class="modal" style="max-width:500px;max-height:85vh;overflow-y:auto">
-        <h2>${tk.customer_name}</h2>
-        <p class="muted" style="font-size:13px;margin-bottom:16px">${tk.ticket_number} · ${tk.device_brand} ${tk.device_model}</p>
-        <div style="display:grid;gap:8px;margin-bottom:14px">
-          <strong style="font-size:13px">Components</strong>
-          ${comps.map((c,i) => `
-            <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center">
-              <span style="font-size:13px">${c.name} <small class="muted">(${c.condition})</small></span>
-              <input type="number" min="0" value="${c.price||0}" data-te-price="${i}"
-                style="width:100px;border:1px solid var(--border);border-radius:6px;padding:5px 8px;background:var(--surface);color:var(--text);font-size:13px">
-              <button type="button" data-te-remove="${i}" style="color:var(--danger);background:none;border:none;font-size:18px;cursor:pointer;padding:0 4px">×</button>
-            </div>`).join('')}
-          ${!comps.length ? `<p class="muted" style="font-size:13px">No components yet.</p>` : ''}
-        </div>
-        <div style="display:flex;gap:8px;margin-bottom:16px">
-          <input id="te-new-comp" class="search" placeholder="Component name" style="flex:1">
-          <select id="te-new-cond" style="border:1px solid var(--border);border-radius:6px;padding:7px 9px;background:var(--surface);color:var(--text);font-size:13px">
-            ${['Repaired','Replaced','New','Cleaned','Checked'].map(c => `<option>${c}</option>`).join('')}
-          </select>
-          <button type="button" class="secondary-button" data-action="te-add-comp">+ Add</button>
-        </div>
-        <label style="display:flex;justify-content:space-between;align-items:center;padding:10px;background:var(--surface-2);border-radius:8px;margin-bottom:8px;gap:12px">
-          <span style="font-size:13px;font-weight:500">Labour Charge</span>
-          <input type="number" step="any" min="0" id="te-labour" value="${labourVal<0?0:labourVal}" data-te-labour
-            style="width:110px;border:1px solid var(--border);border-radius:6px;padding:5px 8px;background:var(--surface);color:var(--text);font-size:13px">
-        </label>
-        <div style="display:flex;justify-content:space-between;font-weight:600;padding:10px;background:var(--surface-2);border-radius:8px;margin-bottom:16px">
-          <span>Updated Quote</span><span id="te-total">${money(partsTotal+(isNaN(labourVal)?0:labourVal))}</span>
-        </div>
+  if (type === 'mark-not-needed') {
+    const tk = (state.data.tickets||[]).find(t => String(t.id) === String(state.modal.ticketId))
+    const c  = tk?.components_noted?.[state.modal.index]
+    if (!tk || !c) return ''
+    return `<div class="modal-backdrop" data-no-backdrop-close>
+      <div class="modal" style="max-width:400px">
+        <h2>Mark "${c.name}" Not Needed</h2>
+        <p class="muted" style="font-size:13px">E.g. "Only needed cleaning, no repair required." This stays visible on the ticket, it's not deleted.</p>
+        <label class="field"><span>Reason</span><textarea id="not-needed-reason" style="min-height:56px"></textarea></label>
         <div class="modal-actions">
-          <button class="secondary-button" data-close>Cancel</button>
-          <button class="primary-button" data-action="te-save">Save to Ticket</button>
+          <button type="button" class="secondary-button" data-close>Cancel</button>
+          <button type="button" class="primary-button" data-action="confirm-not-needed">Confirm (PIN required)</button>
         </div>
-      </div></div>`
+      </div>
+    </div>`
+  }
+
+  if (type === 'create-sub-invoice') {
+    const parentId = state.modal.parentId
+    const tk = (state.data.tickets||[]).find(t => String(t.id) === String(parentId))
+    if (!tk) return ''
+    const draft      = state.modal.draftComponents || []
+    const labour     = state.modal.draftLabour ?? 0
+    const compDefs   = state.data.repairComponents || []
+    const partsTotal = draft.reduce((s,c) => s + Number(c.price||0), 0)
+    const total      = partsTotal + labour
+
+    return `
+      <div class="modal-backdrop" data-no-backdrop-close>
+        <div class="modal" style="max-width:560px;max-height:90vh;overflow-y:auto">
+          <h2 style="margin-bottom:4px">Create Sub-Invoice</h2>
+          <p class="muted" style="font-size:13px;margin-bottom:16px">
+            Linked to ${tk.invoice_number} — ${tk.customer_name}, ${tk.device_brand} ${tk.device_model}
+          </p>
+
+          <div style="display:grid;gap:8px;margin-bottom:14px">
+            <strong style="font-size:13px">Additional Components</strong>
+            ${draft.length ? draft.map((c,i) => `
+              <div style="display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center">
+                <div>
+                  <span style="font-size:13px"><strong>${c.name}</strong></span>
+                  <span class="badge warn" style="font-size:11px;margin-left:6px">${c.tag || ''}</span>
+                  ${c.customText ? `<span class="muted" style="font-size:12px"> — ${c.customText}</span>` : ''}
+                </div>
+                <input type="number" step="any" min="0" value="${c.price || ''}" placeholder="Price"
+                  data-subinv-comp-price="${i}"
+                  style="width:110px;border:1px solid var(--border);border-radius:6px;
+                         padding:6px 8px;background:var(--surface);color:var(--text);font-size:13px">
+                <button type="button" data-subinv-comp-remove="${i}"
+                  style="color:var(--danger);background:none;border:none;font-size:18px;cursor:pointer;padding:0 4px">×</button>
+              </div>`).join('') : `<p class="muted" style="font-size:13px">No components added yet.</p>`}
+          </div>
+
+          <div style="margin-bottom:12px">
+            <p class="muted" style="font-size:12px;margin-bottom:6px">Add component:</p>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+              ${compDefs.map(c => `<button type="button" class="secondary-button" style="font-size:12px;padding:5px 12px"
+                data-add-draft-comp-name="${c.name}">${c.name}</button>`).join('')}
+            </div>
+            <div style="display:flex;gap:8px">
+              <input id="custom-comp-name" class="search" placeholder="Custom component name" style="flex:1">
+              <button type="button" class="secondary-button" data-action="add-custom-draft-comp">+ Add</button>
+            </div>
+          </div>
+
+          <label style="display:flex;justify-content:space-between;align-items:center;padding:10px;
+                        background:var(--surface-2);border-radius:8px;margin-bottom:8px;gap:12px">
+            <span style="font-size:13px;font-weight:500">Labour Charge</span>
+            <input type="number" step="any" min="0" value="${labour || ''}" placeholder="0" data-subinv-labour
+              style="width:120px;border:1px solid var(--border);border-radius:6px;
+                     padding:6px 8px;background:var(--surface);color:var(--text);font-size:13px">
+          </label>
+
+          <label class="field" style="margin-bottom:12px">
+            <span>Note</span>
+            <textarea id="sub-invoice-note" style="min-height:56px" placeholder="What was found / done…"></textarea>
+          </label>
+
+          <div style="display:flex;justify-content:space-between;font-weight:600;padding:10px;
+                      background:var(--surface-2);border-radius:8px;margin-bottom:16px;font-size:15px">
+            <span>Sub-Invoice Total</span><span id="subinv-draft-total">${money(total)}</span>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" class="secondary-button" data-close>Cancel</button>
+            <button type="button" class="primary-button" data-action="submit-sub-invoice" data-parent-id="${parentId}">
+              Create & Print
+            </button>
+          </div>
+        </div>
+      </div>`
+  }
+
+  if (type === 'add-comp-tag') {
+    const { compName } = state.modal
+    return `
+      <div class="modal-backdrop" data-no-backdrop-close>
+        <div class="modal" style="max-width:360px">
+          <h2>${compName}</h2>
+          <p class="muted" style="font-size:13px">What's the issue?</p>
+          <div style="display:grid;gap:8px;margin-top:10px">
+            <button type="button" class="secondary-button" style="font-size:15px;min-height:48px" data-tag-select="Broken">Broken</button>
+            <button type="button" class="secondary-button" style="font-size:15px;min-height:48px" data-tag-select="Not Working">Not Working</button>
+            <button type="button" class="secondary-button" style="font-size:15px;min-height:48px" data-tag-select="Custom">Custom…</button>
+            <div id="custom-tag-wrap" class="hidden" style="display:grid;gap:8px">
+              <input id="custom-tag-text" class="search" placeholder="Describe the issue">
+              <button type="button" class="primary-button" data-action="confirm-draft-custom-tag">Add</button>
+            </div>
+          </div>
+          <div class="modal-actions"><button class="secondary-button" data-close>Cancel</button></div>
+        </div>
+      </div>`
   }
 
   if (type === 'repair') {
@@ -973,7 +1071,7 @@ function renderModal() {
       <div class="modal-backdrop" data-no-backdrop-close>
         <div class="modal" style="max-width:600px;max-height:90vh;overflow-y:auto">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <h2 style="margin:0">INV-${s.id}</h2>
+            <h2 style="margin:0">${s.invoice_number||`INV-${s.id}`}</h2>
             <button class="icon-button" data-close style="font-size:20px;line-height:1">×</button>
           </div>
 
@@ -1077,9 +1175,10 @@ function attachEvents() {
 
     const el = e.target.closest(
       'button,[data-modal],[data-close],[data-action],[data-comp],[data-remove-comp],' +
-      '[data-settings-tab],[data-catalog-tab],[data-kpi-target],[data-pp-key],[data-te-remove],' +
+      '[data-settings-tab],[data-catalog-tab],[data-kpi-target],[data-pp-key],' +
       '[data-remove-quick],[data-remove-qitem],[data-add-qprice],[data-remove-qprice],' +
-      '[data-inv-edit],[data-inv-delete],[data-settle-id],[data-view-ticket]'
+      '[data-inv-edit],[data-inv-delete],[data-settle-id],[data-view-ticket],' +
+      '[data-mark-not-needed],[data-subinv-comp-remove],[data-add-draft-comp-name],[data-tag-select]'
     )
     if (!el) return
 
@@ -1135,6 +1234,109 @@ function attachEvents() {
       el.closest('[data-variant-row]')?.remove()
       return
     }
+    /* Mark a component "not needed" — requires PIN, never deletes */
+    if (el.dataset.markNotNeeded !== undefined) {
+      const ticketId = state.modal?.id
+      state.modal = { type: 'mark-not-needed', ticketId, index: Number(el.dataset.markNotNeeded) }
+      render(); return
+    }
+    if (el.dataset.action === 'confirm-not-needed') {
+      const reason = document.getElementById('not-needed-reason')?.value?.trim()
+      if (!reason) { alert('Enter a reason.'); return }
+      const { ticketId, index } = state.modal
+      openPinPrompt('remove-component', async (verified) => {
+        if (!verified) return
+        const tk = state.data.tickets.find(t => String(t.id) === String(ticketId))
+        if (!tk) return
+        const res = await markComponentNotNeeded(ticketId, tk.components_noted||[], index, reason, SESSION.employee?.name)
+        if (!res.ok) { alert('Error: ' + res.error); return }
+        await load()
+        const subs = await getSubInvoices(ticketId)
+        state.modal = { type: 'ticketDetail', id: ticketId, subInvoices: subs }
+        render()
+      }, render)
+      return
+    }
+
+    /* Open sub-invoice creation form */
+    if (el.dataset.action === 'open-create-sub-invoice') {
+      state.modal = { type: 'create-sub-invoice', parentId: el.dataset.ticketId, draftComponents: [], draftLabour: 0 }
+      render(); return
+    }
+
+    /* Remove component from the sub-invoice draft */
+    if (el.dataset.subinvCompRemove !== undefined) {
+      const parentId = state.modal?.parentId
+      const comps = readSubInvCompsFromDOM()
+      comps.splice(Number(el.dataset.subinvCompRemove), 1)
+      state.modal = { type: 'create-sub-invoice', parentId, draftComponents: comps, draftLabour: readSubInvLabourFromDOM() }
+      render(); return
+    }
+
+    /* Add predefined component to the draft — opens tag picker */
+    if (el.dataset.addDraftCompName) {
+      state.modal = {
+        type:     'add-comp-tag',
+        compName: el.dataset.addDraftCompName,
+        _parentId: state.modal?.parentId,
+        _draftComponents: readSubInvCompsFromDOM(),
+        _draftLabour: readSubInvLabourFromDOM(),
+      }
+      render(); return
+    }
+
+    /* Add custom component to the draft — opens tag picker */
+    if (el.dataset.action === 'add-custom-draft-comp') {
+      const name = document.getElementById('custom-comp-name')?.value?.trim()
+      if (!name) { alert('Enter a component name.'); return }
+      state.modal = {
+        type:     'add-comp-tag',
+        compName: name,
+        _parentId: state.modal?.parentId,
+        _draftComponents: readSubInvCompsFromDOM(),
+        _draftLabour: readSubInvLabourFromDOM(),
+      }
+      render(); return
+    }
+
+    /* Tag selection for the sub-invoice draft — Broken / Not Working / Custom */
+    if (el.dataset.tagSelect) {
+      const tag = el.dataset.tagSelect
+      if (tag === 'Custom') {
+        const wrap = document.getElementById('custom-tag-wrap')
+        if (wrap) wrap.classList.remove('hidden')
+        return
+      }
+      _addComponentToDraft(state.modal.compName, tag, '')
+      return
+    }
+    if (el.dataset.action === 'confirm-draft-custom-tag') {
+      const text = document.getElementById('custom-tag-text')?.value?.trim()
+      if (!text) { alert('Describe the issue.'); return }
+      _addComponentToDraft(state.modal.compName, 'Custom', text)
+      return
+    }
+
+    /* Create the sub-invoice — no PIN required, adding only increases what's owed */
+    if (el.dataset.action === 'submit-sub-invoice') {
+      const parentId = el.dataset.parentId
+      const tk = state.data.tickets.find(t => String(t.id) === String(parentId))
+      if (!tk) return
+      const comps  = readSubInvCompsFromDOM()
+      const labour = readSubInvLabourFromDOM()
+      const note   = document.getElementById('sub-invoice-note')?.value || ''
+      if (!comps.length && !labour) { alert('Add at least one component or a labour charge.'); return }
+
+      const res = await createSubInvoice(tk, comps, labour, note, SESSION.employee?.name)
+      if (!res.ok) { alert('Error: ' + res.error); return }
+
+      const { buildSubInvoiceSlip, printThermal } = await import('../print/print.js')
+      printThermal(buildSubInvoiceSlip(res.data, tk))
+
+      state.modal = null
+      await load(); return
+    }
+
     if (el.dataset.action === 'my-account') {
       state.modal = { type: 'myAccount' }; render(); return
     }
@@ -1228,11 +1430,15 @@ function attachEvents() {
     }
 
     if (el.dataset.action === 'open-ticket-editor') {
-      const tk = state.data.tickets.find(t => String(t.id) === String(el.dataset.ticketId))
-      if (!tk) return
-      const pt = (tk.components_noted||[]).reduce((s,c) => s+Number(c.price||0), 0)
-      adminState.teLabour = Math.max(0, Number(tk.estimated_quote||0)-pt)
-      state.modal = { type:'ticket-editor', id:el.dataset.ticketId }; render(); return
+      const ticketId = el.dataset.ticketId
+      state.modal = { type:'ticketDetail', id:ticketId, subInvoices: [] }
+      render()
+      const subs = await getSubInvoices(ticketId)
+      if (state.modal?.type === 'ticketDetail' && String(state.modal.id) === ticketId) {
+        state.modal.subInvoices = subs
+        render()
+      }
+      return
     }
 
     if (el.dataset.action === 'admin-collect') {
@@ -1241,43 +1447,6 @@ function attachEvents() {
       sessionStorage.setItem('retailos_collect_ticket', String(found.id))
       const { navigate } = await import('../router.js')
       navigate('/pos'); return
-    }
-
-    if (el.dataset.action === 'te-add-comp') {
-      const name = document.getElementById('te-new-comp')?.value?.trim()
-      const cond = document.getElementById('te-new-cond')?.value || 'New'
-      if (!name) return
-      const tk = state.data.tickets.find(t => String(t.id) === String(state.modal?.id))
-      if (!tk) return
-      document.querySelectorAll('[data-te-price]').forEach((inp,i) => {
-        if (tk.components_noted[i]) tk.components_noted[i].price = Number(inp.value)||0
-      })
-      adminState.teLabour = Number(document.getElementById('te-labour')?.value||0)
-      tk.components_noted = [...tk.components_noted, { name, condition:cond, price:0 }]
-      render(); return
-    }
-    if (el.dataset.teRemove !== undefined) {
-      const tk = state.data.tickets.find(t => String(t.id) === String(state.modal?.id))
-      if (!tk) return
-      document.querySelectorAll('[data-te-price]').forEach((inp,i) => {
-        if (tk.components_noted[i]) tk.components_noted[i].price = Number(inp.value)||0
-      })
-      adminState.teLabour = Number(document.getElementById('te-labour')?.value||0)
-      tk.components_noted.splice(Number(el.dataset.teRemove), 1); render(); return
-    }
-    if (el.dataset.action === 'te-save') {
-      const tk = state.data.tickets.find(t => String(t.id) === String(state.modal?.id))
-      if (!tk) return
-      document.querySelectorAll('[data-te-price]').forEach((inp,i) => {
-        if (tk.components_noted[i]) tk.components_noted[i].price = Number(inp.value)||0
-      })
-      const labour  = Number(document.getElementById('te-labour')?.value||0)
-      const pt      = tk.components_noted.reduce((s,c) => s+Number(c.price||0), 0)
-      const { error } = await sb.from('tickets').update({
-        components_noted: tk.components_noted, estimated_quote: pt+labour, labour_cost: labour
-      }).eq('id', tk.id)
-      if (error) { alert('Save failed: '+error.message); return }
-      adminState.teLabour = null; state.modal = null; await load(); return
     }
 
     if (el.dataset.action === 'save-ticket-detail') {
@@ -1297,7 +1466,7 @@ function attachEvents() {
       if (!sale) { alert('Sale not found.'); return }
       const { buildReceiptSlip, printThermal } = await import('../print/print.js')
       const reprSale = {
-        receiptNo: `INV-${sale.id}`, date: sale.created_at,
+        receiptNo: sale.invoice_number||`INV-${sale.id}`, date: sale.created_at,
         cashier: sale.employee_name||'Counter', customer: sale.customer_name||'Walk-in',
         items: (sale.items_sold||[]).map(i => ({
           name:i.name, variantName:i.variant_name||'', qty:i.qty||1, soldPrice:i.sold_price||i.soldPrice||0,
@@ -1459,8 +1628,15 @@ function attachEvents() {
 
     const viewTicketEl = el.closest('[data-view-ticket]')
     if (viewTicketEl && el.tagName !== 'BUTTON' && !el.closest('button')) {
-      state.modal = { type:'ticketDetail', id:String(viewTicketEl.dataset.viewTicket) }
-      render(); return
+      const ticketId = String(viewTicketEl.dataset.viewTicket)
+      state.modal = { type:'ticketDetail', id:ticketId, subInvoices: [] }
+      render()
+      const subs = await getSubInvoices(ticketId)
+      if (state.modal?.type === 'ticketDetail' && String(state.modal.id) === ticketId) {
+        state.modal.subInvoices = subs
+        render()
+      }
+      return
     }
   })
 
@@ -1471,10 +1647,10 @@ function attachEvents() {
     if (t.dataset.receiptSearch !== undefined) { adminState.receiptSearch = t.value; render() }
     if (t.dataset.receiptFrom !== undefined) { adminState.receiptDateFrom = t.value; render() }
     if (t.dataset.receiptTo   !== undefined) { adminState.receiptDateTo   = t.value; render() }
-    if (t.dataset.tePrice !== undefined || t.dataset.teLabour !== undefined) {
-      const prices = [...document.querySelectorAll('[data-te-price]')].reduce((s,inp) => s+(Number(inp.value)||0), 0)
-      const labour = Number(document.getElementById('te-labour')?.value||0)
-      const el     = document.getElementById('te-total')
+    if (t.dataset.subinvCompPrice !== undefined || t.dataset.subinvLabour !== undefined) {
+      const prices = [...document.querySelectorAll('[data-subinv-comp-price]')].reduce((s,inp) => s+(Number(inp.value)||0), 0)
+      const labour = Number(document.querySelector('[data-subinv-labour]')?.value||0)
+      const el     = document.getElementById('subinv-draft-total')
       if (el) el.textContent = money(prices+labour)
     }
   })
@@ -1490,7 +1666,8 @@ function attachEvents() {
     }
     const map = {
       'new-comp-input': 'add-quick-comp',
-      'te-new-comp':    'te-add-comp',
+      'custom-comp-name': 'add-custom-draft-comp',
+      'custom-tag-text':  'confirm-draft-custom-tag',
     }
     const action = map[e.target.id]
     if (!action) return
@@ -1607,6 +1784,8 @@ function attachEvents() {
       if (data.secondaryColor)      updates.secondary_color  = data.secondaryColor
       if (data.currency)            updates.currency         = data.currency
       if (data.taxRate)             updates.tax_rate         = Number(data.taxRate)
+      if (data.invoicePrefix)       updates.invoice_prefix   = data.invoicePrefix.trim().toUpperCase()
+      if (data.ticketPrefix)        updates.ticket_prefix    = data.ticketPrefix.trim().toUpperCase()
       if (data.receiptFooter)       updates.terms_text       = data.receiptFooter
       if (data.businessDescription) updates.shop_description = data.businessDescription
       const { error } = await sb.from('shop_config').update(updates).eq('id',1)
@@ -1667,6 +1846,29 @@ function attachEvents() {
       if (/^[0-9]$/.test(e.key))            { e.preventDefault(); handlePpKey(e.key,verifyAdminLocal,render); return }
     }
   })
+}
+
+/* ── Sub-invoice draft helpers ── */
+function readSubInvCompsFromDOM() {
+  const comps = [...(state.modal?.draftComponents || [])]
+  document.querySelectorAll('[data-subinv-comp-price]').forEach((inp, i) => {
+    if (comps[i]) comps[i].price = Number(inp.value) || 0
+  })
+  return comps
+}
+
+function readSubInvLabourFromDOM() {
+  return Number(document.querySelector('[data-subinv-labour]')?.value || 0)
+}
+
+function _addComponentToDraft(name, tag, customText) {
+  const parentId = state.modal._parentId
+  const draftComponents = [
+    ...(state.modal._draftComponents || []),
+    { name, tag, customText, price: 0 },
+  ]
+  state.modal = { type: 'create-sub-invoice', parentId, draftComponents, draftLabour: state.modal._draftLabour || 0 }
+  render()
 }
 
 async function verifyAdminLocal(pin) {
