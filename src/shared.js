@@ -347,6 +347,7 @@ export function pinPromptHTML(purpose) {
     settle:   'Admin PIN to settle credit',
     return:   'Admin PIN to process return',
     discount: 'PIN required to apply discount',
+    udhar:    'PIN required for credit sale',
   }[purpose] || 'Verify identity'
   return `
     <div class="modal" style="max-width:340px">
@@ -364,10 +365,12 @@ export function pinPromptHTML(purpose) {
     </div>`
 }
 
+let ppSubmitting = false
+
 export async function handlePpKey(key, verifyFn, renderFn) {
   const display = document.getElementById('pp-display')
   const errEl   = document.getElementById('pp-error')
-  if (!display) return
+  if (!display || ppSubmitting) return
   if (key === '⌫') { ppBuffer = ppBuffer.slice(0,-1) }
   else if (key === '✓') { await _submitPp(verifyFn, renderFn); return }
   else { if (ppBuffer.length >= 6) return; ppBuffer += String(key) }
@@ -377,14 +380,15 @@ export async function handlePpKey(key, verifyFn, renderFn) {
 }
 
 async function _submitPp(verifyFn, renderFn) {
+  if (ppSubmitting) return
+  ppSubmitting = true
   const pin = ppBuffer; ppBuffer = ''
   const res = await verifyFn(pin)
+  ppSubmitting = false
   if (res.ok) {
     state.modal = null
-    // Pass verified=true explicitly — callback must check this
     if (ppCallback) await ppCallback(true)
   } else {
-    // Never call ppCallback on failure
     const errEl   = document.getElementById('pp-error')
     const display = document.getElementById('pp-display')
     if (errEl)   errEl.classList.remove('hidden')

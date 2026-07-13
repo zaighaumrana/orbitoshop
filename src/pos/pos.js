@@ -158,10 +158,7 @@ function posView() {
         ${CFG.repair_module_enabled ? `
           <button class="primary-button" data-modal="repair">+ New Ticket</button>
           <button class="secondary-button" data-action="open-repair-collection">🔧 Repairs</button>` : ''}
-        ${CFG.ems_enabled && !(SESSION.isAdmin || SESSION.employee?.role === 'Business Owner') ? `
-          <button class="secondary-button" data-action="open-leave-request">📋 Leave</button>
-        ` : ''}
-          <button class="secondary-button" data-action="open-return">↩ Return</button>
+        <button class="secondary-button" data-action="open-return">↩ Return</button>
         <button class="secondary-button" data-action="open-udhar">₨ Credits</button>
       </div>
     </div>
@@ -778,9 +775,13 @@ function ticketSlipPreview(ticket) {
     Date: ${new Date(ticket.created_at||Date.now()).toLocaleString()}
     <hr>
     <strong>Issues Noted:</strong><br>
-    ${comps.length ? comps.map(c => `· ${c.name}${c.condition?` (${c.condition})`:''}${Number(c.price)>0?` — ${money(c.price)}`:''}`).join('<br>') : 'No components noted.'}
+    ${comps.length ? comps.map(c => {
+      const label = c.tag === 'Custom' ? (c.customText || '') : (c.tag || '')
+      return `· ${c.name}${label?` (${label})`:''}${Number(c.price)>0?` — ${money(c.price)}`:''}`
+    }).join('<br>') : 'No components noted.'}
     <hr>
     ${ticket.technician_note ? `<strong>Technician Note:</strong><br>${ticket.technician_note}<hr>` : ''}
+    ${Number(ticket.labour_cost)>0 ? `Labour Fee: <strong>${money(ticket.labour_cost)}</strong><br>` : ''}
     Estimated Quote: <strong>${money(ticket.estimated_quote)}</strong><br>
     ${Number(ticket.advance_payment)>0 ? `Advance Paid: <strong>${money(ticket.advance_payment)}</strong>${ticket.advance_method?` (${ticket.advance_method})`:''}<br>` : ''}
     <hr>
@@ -853,6 +854,7 @@ async function placeOrder() {
       balance_due:         Math.max(0, total - paid),
       payment_history:     draft.payments,
       advance_payment:     paid,
+      advance_method:      [...new Set(draft.payments.map(p=>p.method))].join(' + '),
       status:              'Pending',
       technician_note:     ticketItem.technicianNote || '',
       created_by:          SESSION.employee?.name || 'Counter',
@@ -911,14 +913,28 @@ function generateTicketNumber() {
 /* ── Standard checkout (retail items, no ticket in cart) ── */
 async function doCheckout() {
   const isUdhar  = posState.checkoutPayment === 'Udhar (Credit)'
-  const subtotal = posState.cart.reduce((s,i)=>s+i.soldPrice*i.qty,0)
-  const discount = posState.cart.reduce((s,i)=>s+(i.originalPrice-i.soldPrice)*i.qty,0)
-  const tax      = subtotal*(Number(CFG.tax_rate||0)/100)
-  const total    = subtotal+tax
 
   if (isUdhar && (!posState.udharName?.trim()||!posState.udharPhone?.trim())) {
     state.modal = { type:'udharInfo' }; render(); return
   }
+
+  if (isUdhar) {
+    openPinPrompt('udhar', async (verified) => {
+      if (!verified) return
+      await _finalizeCheckout()
+    }, render)
+    return
+  }
+
+  await _finalizeCheckout()
+}
+
+async function _finalizeCheckout() {
+  const isUdhar  = posState.checkoutPayment === 'Udhar (Credit)'
+  const subtotal = posState.cart.reduce((s,i)=>s+i.soldPrice*i.qty,0)
+  const discount = posState.cart.reduce((s,i)=>s+(i.originalPrice-i.soldPrice)*i.qty,0)
+  const tax      = subtotal*(Number(CFG.tax_rate||0)/100)
+  const total    = subtotal+tax
 
   const { data:saleData, error:saleErr } = await sb.from('sales').insert({
     ticket_id:      null,

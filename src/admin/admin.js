@@ -553,9 +553,9 @@ function catalogTabContent() {
               }).join('')}
             </div>
             <div style="display:flex;gap:8px">
-              <input class="search" placeholder="Brand/Variant name (optional)" id="qvariant-name-${i}" style="flex:2">
+              <input class="search" placeholder="Brand/Variant name (optional)" id="qvariant-name-${i}" style="flex:2;min-width:0">
               <input type="number" step="any" min="0" placeholder="Price" id="qprice-input-${i}"
-                style="flex:1;border:1px solid var(--border);border-radius:6px;
+                style="flex:1;min-width:0;border:1px solid var(--border);border-radius:6px;
                        padding:7px 9px;background:var(--surface);color:var(--text)">
               <button type="button" class="secondary-button" data-add-qprice="${i}">+ Add</button>
             </div>
@@ -567,8 +567,8 @@ function catalogTabContent() {
 
 function qiVariantRowHTML() {
   return `<div data-variant-row style="display:flex;gap:8px;margin-bottom:8px">
-    <input class="search" name="variantName[]" placeholder="Brand/Variant name (optional)" style="flex:2">
-    <input type="number" step="any" min="0" name="variantPrice[]" placeholder="Price" class="search" style="flex:1">
+    <input class="search" name="variantName[]" placeholder="Brand/Variant name (optional)" style="flex:2;min-width:0">
+    <input type="number" step="any" min="0" name="variantPrice[]" placeholder="Price" class="search" style="flex:1;min-width:0">
     <button type="button" class="secondary-button" data-action="remove-variant-row" style="color:var(--danger)">×</button>
   </div>`
 }

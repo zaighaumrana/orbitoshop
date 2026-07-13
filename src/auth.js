@@ -81,10 +81,11 @@ export function renderLogin(onSuccess) {
 }
 
 async function submitLogin() {
+  const btn = document.getElementById('login-btn')
+  if (btn?.disabled) return  // Turnstile not verified yet, or a submit is already in flight
   const emailEl = document.getElementById('login-email')
   const passEl  = document.getElementById('login-password')
   const errEl   = document.getElementById('login-error')
-  const btn     = document.getElementById('login-btn')
   const email   = emailEl?.value?.trim() || ''
   const pass    = passEl?.value?.trim()  || ''
 

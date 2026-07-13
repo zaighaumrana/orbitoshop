@@ -37,14 +37,16 @@ export function buildTicketSlip(ticket) {
     <div class="row"><span>Date</span><span>${new Date(ticket.created_at).toLocaleDateString()}</span></div>
     <div class="ln"></div>
     <div class="b">Issues Noted:</div>
-    ${comps.length ? comps.map(c => `
-      <div class="row"><span>· ${c.name}${c.condition ? ` (${c.condition})` : ''}</span><span class="sm">${Number(c.price) > 0 ? money(c.price) : ''}</span></div>
-    `).join('') : '<div class="sm">No components noted.</div>'}
+    ${comps.length ? comps.map(c => {
+      const label = c.tag === 'Custom' ? (c.customText || '') : (c.tag || '')
+      return `<div class="row"><span>· ${c.name}${label ? ` (${label})` : ''}</span><span class="sm">${Number(c.price)>0 ? money(c.price) : ''}</span></div>`
+    }).join('') : '<div class="sm">No components noted.</div>'}
     <div class="ln"></div>
+    ${Number(ticket.labour_cost)>0 ? `<div class="row"><span>Labour Fee</span><span>${money(ticket.labour_cost)}</span></div>` : ''}
     <div class="row"><span>Estimated Quote</span><span>${money(ticket.estimated_quote)}</span></div>
-    ${Number(ticket.advance_payment)>0 ? `<div class="row"><span>Advance Paid</span><span>${money(ticket.advance_payment)} (${ticket.advance_method})</span></div>` : ''}
+    ${Number(ticket.advance_payment)>0 ? `<div class="row"><span>Advance Paid</span><span>${money(ticket.advance_payment)}${ticket.advance_method ? ` (${ticket.advance_method})` : ''}</span></div>` : ''}
     <div class="ln"></div>
-    ${ticket.technician_note ? `<div class="b sm">Technician Note:</div><div class="sm">${ticket.technician_note}</div><div class="ln"></div>` : ''}
+    ${ticket.technician_note ? `<div class="sm">Note: ${ticket.technician_note}</div><div class="ln"></div>` : ''}
     ${CFG.terms_text ? `<div class="c sm">${CFG.terms_text}</div><div class="ln"></div>` : ''}
     <div class="ln"></div>
     <div class="c sm">Track your repair online:</div>
@@ -73,8 +75,7 @@ export function buildReceiptSlip(sale, isReprint = false) {
       <div class="row"><span>${i.name}</span>${i.variantName ? '' : `<span>${money(i.soldPrice*i.qty)}</span>`}</div>
       ${i.variantName ? `<div class="row"><span>&nbsp;&nbsp;${i.variantName}</span><span>${money(i.soldPrice*i.qty)}</span></div>` : ''}
       <div class="sm row"><span>  ${i.qty} × ${money(i.soldPrice)}${i.discount>0?` (disc ${money(i.discount)})`:''}</span></div>
-    `).join('')}/div>
-    
+    `).join('')}
     <div class="ln"></div>
     ${sale.discount>0 ? `<div class="row"><span>Discount</span><span>${money(sale.discount)}</span></div>` : ''}
     ${sale.labour>0   ? `<div class="row"><span>Labour</span><span>${money(sale.labour)}</span></div>`   : ''}

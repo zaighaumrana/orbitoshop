@@ -86,8 +86,6 @@ function render() {
             </button>
             ${CFG.ems_enabled && !isAdmin ? `
               <button class="secondary-button" style="font-size:12px"
-                data-action="open-leave-request">📋 Leave</button>
-              <button class="secondary-button" style="font-size:12px"
                 data-action="ems-clock-out">🕐 Clock Out</button>
             ` : ''}
             <button class="icon-button" data-action="logout"
