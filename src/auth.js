@@ -54,22 +54,35 @@ export function renderLogin(onSuccess) {
 
   // Mount Turnstile — only on production
   const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  const wrap = document.getElementById('cf-turnstile-wrap')
-  if (!isDev && wrap && window.turnstile) {
-    window.turnstile.render(wrap, {
-      sitekey: '0x4AAAAAADl87EDGnxcg5eJZ',
-      theme:   state.theme === 'dark' ? 'dark' : 'light',
-      callback: () => {
-        const b = document.getElementById('login-btn')
-        if (b) b.disabled = false
-      },
-      'error-callback': () => {
-        const b = document.getElementById('login-btn')
-        if (b) b.disabled = true
-      },
-    })
-    const b = document.getElementById('login-btn')
-    if (b) b.disabled = true
+  const wrap  = document.getElementById('cf-turnstile-wrap')
+  const btn   = document.getElementById('login-btn')
+
+  if (!isDev) {
+    // Lock the button immediately — do NOT wait for window.turnstile to exist first.
+    // The Turnstile script loads async from a CDN; on a slow connection it may not
+    // be ready by the time this renders, and skipping the lock in that window let
+    // the login button stay fully clickable with no verification at all.
+    if (btn) btn.disabled = true
+
+    let attempts = 0
+    const mountTurnstile = () => {
+      if (wrap && window.turnstile) {
+        window.turnstile.render(wrap, {
+          sitekey: '0x4AAAAAADl87EDGnxcg5eJZ',
+          theme:   state.theme === 'dark' ? 'dark' : 'light',
+          callback: () => { if (btn) btn.disabled = false },
+          'error-callback': () => { if (btn) btn.disabled = true },
+        })
+      } else if (attempts++ < 75) {
+        // Script not loaded yet — keep checking (up to ~15s). Button stays locked throughout.
+        setTimeout(mountTurnstile, 200)
+      } else if (wrap) {
+        wrap.innerHTML = `<p style="color:var(--danger);font-size:12px;text-align:center">
+          Verification failed to load. Check your connection (or disable any ad-blocker) and refresh the page.
+        </p>`
+      }
+    }
+    mountTurnstile()
   }
   // On localhost login button stays enabled
 
