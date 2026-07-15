@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 .env
 .temp
+Thumbs.db
+.wrangler
+.vercel
+.netlify
