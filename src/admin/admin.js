@@ -94,6 +94,9 @@ function render() {
   const tenant = currentTenant()
   if (!can(adminState.adminModule, state.role)) adminState.adminModule = 'dashboard'
   const _modalScroll = document.querySelector('.modal')?.scrollTop || 0
+  const _activeEl   = document.activeElement
+  const _focusAttr  = _activeEl?.hasAttribute('data-receipt-search') ? 'data-receipt-search' : null
+  const _cursorPos  = _focusAttr ? _activeEl.selectionStart : null
 
   document.getElementById('app').innerHTML = `
     <div class="app-shell client-shell">
@@ -145,6 +148,10 @@ function render() {
   if (_modalScroll) {
     const m = document.querySelector('.modal')
     if (m) m.scrollTop = _modalScroll
+  }
+  if (_focusAttr) {
+    const el = document.querySelector(`[${_focusAttr}]`)
+    if (el) { el.focus(); if (_cursorPos != null) el.setSelectionRange(_cursorPos, _cursorPos) }
   }
 }
 
@@ -721,6 +728,19 @@ function renderModal() {
     </div></div>`
   }
 
+  if (type === 'receipt') return `<div class="modal-backdrop" data-no-backdrop-close>
+    <div class="modal">
+      <h2>Repair Ticket Created</h2>
+      <div style="text-align:center;padding:12px 0">
+        <div style="font-size:15px;font-weight:700">${state.modal.ticket.invoice_number || state.modal.ticket.ticket_number}</div>
+        <div class="muted" style="font-size:12px">Ticket: ${state.modal.ticket.ticket_number}</div>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary-button" data-close>Close</button>
+        <button class="primary-button" data-action="print-ticket-slip">Print Receipt</button>
+      </div>
+    </div></div>`
+
   if (type === 'employee') {
     if (state.modal.editMode) {
       const e = state.modal
@@ -1184,6 +1204,13 @@ function attachEvents() {
 
     if (el.dataset.ppKey !== undefined) { handlePpKey(el.dataset.ppKey, verifyAdminLocal, render); return }
     if (el.dataset.close !== undefined) { state.modal = null; render(); return }
+    if (el.dataset.action === 'print-ticket-slip') {
+      if (state.modal?.ticket) {
+        const { buildTicketSlip, printThermal } = await import('../print/print.js')
+        printThermal(buildTicketSlip(state.modal.ticket))
+      }
+      return
+    }
 
     if (el.dataset.kpiTarget) {
       const target = el.dataset.kpiTarget
@@ -1364,8 +1391,7 @@ function attachEvents() {
       if (!confirm('Log out?')) return
       _clearSession()
       const { navigate } = await import('../router.js')
-      navigate('/login', { force: true })
-      renderLogin(onLoginSuccess); return
+      navigate('/login', { force: true }); return
     }
 
     if (el.dataset.action === 'go-employees-tab') {
@@ -1713,8 +1739,8 @@ function attachEvents() {
         advanceMethod:data.advanceMethod||'', technicianNote:data.technicianNote||'',
       }, SESSION.employee?.name)
       if (!res.ok) { alert('Error saving ticket: '+res.error); return }
-      const { buildTicketSlip, printThermal } = await import('../print/print.js')
-      state.modal = null; printThermal(buildTicketSlip(res.data)); await load(); return
+      state.modal = { type: 'receipt', ticket: res.data }
+      await load(); return
     }
 
     if (type === 'add-quick-item') {

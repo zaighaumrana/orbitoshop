@@ -32,6 +32,7 @@ const posState = {
   cartAdvancePaid: 0,         // sum of payments already entered for this ticket
   udharName:       '',
   udharPhone:      '',
+  udharPaidNow:    0,
   invSearch:       '',
   repairSearch:    '',
 }
@@ -91,6 +92,11 @@ function render() {
   }
   const tenant = currentTenant()
   const _modalScroll = document.querySelector('.modal')?.scrollTop || 0
+  const _activeEl   = document.activeElement
+  const _focusAttr  = _activeEl?.hasAttribute('data-repair-search') ? 'data-repair-search'
+                     : _activeEl?.hasAttribute('data-inv-search')    ? 'data-inv-search'
+                     : null
+  const _cursorPos  = _focusAttr ? _activeEl.selectionStart : null
 
   document.getElementById('app').innerHTML = `
     <div class="app-shell client-shell">
@@ -135,6 +141,10 @@ function render() {
   if (_modalScroll) {
     const m = document.querySelector('.modal')
     if (m) m.scrollTop = _modalScroll
+  }
+  if (_focusAttr) {
+    const el = document.querySelector(`[${_focusAttr}]`)
+    if (el) { el.focus(); if (_cursorPos != null) el.setSelectionRange(_cursorPos, _cursorPos) }
   }
 }
 
@@ -225,6 +235,11 @@ function posView() {
           <div style="display:grid;gap:8px;margin-top:4px">
             <input class="search" placeholder="Customer name *" data-udhar="name" value="${posState.udharName||''}">
             <input class="search" placeholder="Customer phone *" data-udhar="phone" value="${posState.udharPhone||''}">
+            <label style="font-size:13px;font-weight:500;color:var(--muted)">Cash Paid Now (optional)</label>
+            <input type="number" step="any" min="0" placeholder="0 — rest goes on credit"
+              value="${posState.udharPaidNow||''}" data-udhar="paidNow"
+              style="border:1px solid var(--border);border-radius:8px;padding:9px 12px;
+                     background:var(--surface);color:var(--text);font-size:16px;width:100%">
           </div>` : ''}
         ` : `
           <p class="muted" style="font-size:12px;margin-top:4px">
@@ -1212,10 +1227,16 @@ async function _finalizeCheckout() {
   }).select().single()
   if (saleErr) { alert('Sale error: '+saleErr.message); return }
 
-  if (isUdhar) await sb.from('udhar').insert({
-    sale_id:saleData.id, customer_name:posState.udharName, customer_phone:posState.udharPhone,
-    total_amount:Math.max(0,total), amount_paid:0, balance_due:Math.max(0,total), payment_history:[], status:'Outstanding',
-  })
+  if (isUdhar) {
+    const paidNow  = Math.min(Number(posState.udharPaidNow||0), Math.max(0,total))
+    const balance  = Math.max(0, total - paidNow)
+    await sb.from('udhar').insert({
+      sale_id:saleData.id, customer_name:posState.udharName, customer_phone:posState.udharPhone,
+      total_amount:Math.max(0,total), amount_paid:paidNow, balance_due:balance,
+      payment_history: paidNow>0 ? [{ amount:paidNow, method:'Cash', date:new Date().toISOString(), note:'Paid at time of sale' }] : [],
+      status: balance<=0 ? 'Settled' : 'Outstanding',
+    })
+  }
 
   const sale = {
     receiptNo:saleData.invoice_number, date:saleData.created_at,
@@ -1228,7 +1249,7 @@ async function _finalizeCheckout() {
 
   posState.cart=[]
   posState.cashTendered=0
-  posState.udharName=''; posState.udharPhone=''; posState.checkoutPayment='Cash'
+  posState.udharName=''; posState.udharPhone=''; posState.udharPaidNow=0; posState.checkoutPayment='Cash'
   state.modal = { type:'receipt', sale }
   await logBillEvent()
   await load()
@@ -1457,7 +1478,7 @@ function attachEvents() {
       posState.cart = posState.cart.filter(i => !i.isTicket)
       posState.cart.push({
         productId:     `ticket-${ticket.id}`,
-        name:          `Repair Payment: ${ticket.invoice_number||ticket.ticket_number} — ${ticket.device_brand} ${ticket.device_model}`,
+        name:          `Payment on ${ticket.invoice_number||ticket.ticket_number} (${ticket.device_brand} ${ticket.device_model})`,
         qty:           1,
         soldPrice:     amount,
         originalPrice: amount,
@@ -1679,6 +1700,7 @@ function attachEvents() {
     }
     if (t.dataset.udhar === 'name')  { posState.udharName  = t.value; return }
     if (t.dataset.udhar === 'phone') { posState.udharPhone = t.value; return }
+    if (t.dataset.udhar === 'paidNow') { posState.udharPaidNow = Number(t.value)||0; return }
   })
 
   /* ── Submit ── */

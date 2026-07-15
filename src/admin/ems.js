@@ -132,7 +132,7 @@ function renderClockInScreen(sess, isReturn) {
   const ticker  = setInterval(() => {
     if (!clockEl || !document.body.contains(clockEl)) { clearInterval(ticker); return }
     clockEl.textContent = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
-  }, 10000)
+  }, 60000)
 
   document.getElementById('clockin-btn').addEventListener('click', async () => {
     const btn = document.getElementById('clockin-btn')
