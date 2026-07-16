@@ -285,6 +285,11 @@ export function myAccountModalHTML(session) {
   const isOwnerLike = session.isAdmin || session.employee?.role === 'Business Owner'
   return `<div class="modal-backdrop"><div class="modal" style="max-width:420px">
     <h2>My Account</h2>
+    ${state.installPrompt ? `
+      <div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">
+        <button type="button" class="secondary-button" data-action="install" style="width:100%">⬇ Install App</button>
+      </div>
+    ` : ''}
     ${CFG.ems_enabled && !isOwnerLike ? `
       <div style="margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)">
         <p class="muted" style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Employee Self-Service</p>

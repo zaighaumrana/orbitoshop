@@ -2,7 +2,6 @@ import {
   sb, state, CFG, loadConfig, applyBranding, currentTenant,
   _loadSession, _saveSession, _clearSession,
   can, ACCESS, verifyLogin, validatePassword,
-  createTicket, updateTicket,
   money, fld, modalActions, statusBadge,
   openPinPrompt, pinPromptHTML, handlePpKey,
   logBillEvent, logInventoryEvent,
@@ -241,7 +240,7 @@ function repairs() {
       .toLowerCase().includes(adminState.filter.toLowerCase()))
   const sc = {'Pending':'warn','In Progress':'warn','Ready':'good','Delivered':'good','Declined':'bad'}
   return `
-    ${tit('Repair Tickets','Full repair queue.',`<button class="primary-button" data-modal="repair">New Ticket</button>`)}
+    ${tit('Repair Tickets','Full repair queue.',`<button class="primary-button" data-action="go-pos" title="Create tickets from the POS counter">New Ticket (via POS)</button>`)}
     ${tlb('Search by customer, device, ticket…')}
     <div class="grid two-col">
       <div class="card">
@@ -962,52 +961,6 @@ function renderModal() {
       </div>`
   }
 
-  if (type === 'repair') {
-    const comps = (state.data.repairComponents || []).map(c => c.name)
-    const sel   = state.modal?.selectedComponents || []
-    const d     = state.modal?._draft || {}
-    const fldV  = (label,name,val='',t='text') =>
-      `<label class="field"><span>${label}</span><input name="${name}" type="${t}" value="${String(val).replace(/"/g,'&quot;')}" placeholder="${label}" style="width:100%;border:1px solid var(--border);border-radius:8px;padding:8px 12px;background:var(--surface);color:var(--text)"></label>`
-    return `<div class="modal-backdrop"><form class="modal" data-form="repair" style="max-width:680px">
-      <h2>New Repair Ticket</h2>
-      <div class="form-grid">
-        ${fldV('Customer Name','customerName',d.customerName)}
-        ${fldV('Customer Phone','customerPhone',d.customerPhone,'tel')}
-        ${fldV('Device Brand','deviceBrand',d.deviceBrand)}
-        ${fldV('Device Model','deviceModel',d.deviceModel)}
-        ${fldV('IMEI / Serial','imei',d.imei)}
-        ${fldV('Estimated Quote','estimatedQuote',d.estimatedQuote??'','number')}
-        ${fldV('Advance Received','advance',d.advance??'','number')}
-        <label class="field"><span>Advance Method</span>
-          <select name="advanceMethod"><option value="">None</option>
-            ${['Cash','Raast','JazzCash','EasyPaisa','Bank Transfer'].map(m =>
-              `<option ${d.advanceMethod===m?'selected':''}>${m}</option>`).join('')}
-          </select></label>
-        <label class="field" style="grid-column:1/-1"><span>Technician Note</span>
-          <textarea name="technicianNote" style="min-height:56px">${d.technicianNote||''}</textarea></label>
-      </div>
-      <p class="muted" style="font-size:13px;margin:8px 0 6px">Tap to add issues:</p>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-        ${comps.map(c => {
-          const active = sel.find(s => s.name === c)
-          return `<button type="button" class="${active?'primary-button':'secondary-button'}" style="font-size:13px;padding:6px 14px" data-comp="${c}">${c}${active?' ✓':''}</button>`
-        }).join('')}
-      </div>
-      ${sel.length ? `<div style="display:grid;gap:6px;margin-bottom:10px">
-        ${sel.map((s,i) => `
-          <div style="display:flex;align-items:center;gap:8px;padding:8px;background:var(--surface-2);border-radius:8px">
-            <strong style="flex:1">${s.name}</strong>
-            <select data-comp-tag="${i}" style="border:1px solid var(--border);border-radius:6px;padding:5px 8px;background:var(--surface);color:var(--text)">
-              ${['Repaired','Replaced','New','Cleaned','Checked'].map(t =>
-                `<option ${t===s.tag?'selected':''}>${t}</option>`).join('')}
-            </select>
-            <button type="button" data-remove-comp="${i}" style="color:var(--danger);background:none;border:none;font-size:20px;line-height:1;padding:0 4px">×</button>
-          </div>`).join('')}
-      </div>` : ''}
-      ${modalActions()}
-    </form></div>`
-  }
-
   if (type === 'inv-add') return `<div class="modal-backdrop"><form class="modal" data-form="inv-add" style="max-width:500px">
     <h2>Add Inventory Item</h2>
     <div class="form-grid">
@@ -1194,7 +1147,7 @@ function attachEvents() {
     }
 
     const el = e.target.closest(
-      'button,[data-modal],[data-close],[data-action],[data-comp],[data-remove-comp],' +
+      'button,[data-modal],[data-close],[data-action],' +
       '[data-settings-tab],[data-catalog-tab],[data-kpi-target],[data-pp-key],' +
       '[data-remove-quick],[data-remove-qitem],[data-add-qprice],[data-remove-qprice],' +
       '[data-inv-edit],[data-inv-delete],[data-settle-id],[data-view-ticket],' +
@@ -1364,6 +1317,9 @@ function attachEvents() {
       await load(); return
     }
 
+    if (el.dataset.action === 'install' && state.installPrompt) {
+      state.installPrompt.prompt(); state.installPrompt = null; render(); return
+    }
     if (el.dataset.action === 'my-account') {
       state.modal = { type: 'myAccount' }; render(); return
     }
@@ -1603,25 +1559,6 @@ function attachEvents() {
       await load(); return
     }
 
-    if (el.dataset.comp !== undefined) {
-      const name = el.dataset.comp
-      const sel  = state.modal.selectedComponents || []
-      const idx  = sel.findIndex(s => s.name === name)
-      if (idx >= 0) sel.splice(idx, 1); else sel.push({ name, tag:'Repaired', price:0 })
-      state.modal.selectedComponents = sel
-      const form = document.querySelector("[data-form='repair']")
-      if (form) state.modal._draft = Object.fromEntries(new FormData(form).entries())
-      render(); return
-    }
-    if (el.dataset.removeComp !== undefined) {
-      const sel = state.modal.selectedComponents || []
-      sel.splice(Number(el.dataset.removeComp), 1)
-      state.modal.selectedComponents = sel
-      const form = document.querySelector("[data-form='repair']")
-      if (form) state.modal._draft = Object.fromEntries(new FormData(form).entries())
-      render(); return
-    }
-
     if (el.dataset.invEdit) { state.modal = { type:'inv-edit', id:el.dataset.invEdit }; render(); return }
     if (el.dataset.invDelete) {
       if (!confirm('Delete this item?')) return
@@ -1710,16 +1647,6 @@ function attachEvents() {
       navigate(`/admin/${t.value}`)
       return
     }
-    if (t.dataset.compTag !== undefined) {
-      const sel = state.modal?.selectedComponents || []
-      const idx = Number(t.dataset.compTag)
-      if (sel[idx]) {
-        sel[idx].tag = t.value
-        const form = document.querySelector("[data-form='repair']")
-        if (form) state.modal._draft = Object.fromEntries(new FormData(form).entries())
-        render()
-      }
-    }
   })
 
   // Submit
@@ -1728,20 +1655,6 @@ function attachEvents() {
     const form = e.target
     const data = Object.fromEntries(new FormData(form).entries())
     const type = form.dataset.form
-
-    if (type === 'repair') {
-      const sel = state.modal?.selectedComponents || []
-      const res = await createTicket({
-        customerName:data.customerName, customerPhone:data.customerPhone,
-        deviceBrand:data.deviceBrand, deviceModel:data.deviceModel, imei:data.imei,
-        components:sel.map(s => ({ name:s.name, condition:s.tag, price:0 })),
-        estimatedQuote:Number(data.estimatedQuote||0), advance:Number(data.advance||0),
-        advanceMethod:data.advanceMethod||'', technicianNote:data.technicianNote||'',
-      }, SESSION.employee?.name)
-      if (!res.ok) { alert('Error saving ticket: '+res.error); return }
-      state.modal = { type: 'receipt', ticket: res.data }
-      await load(); return
-    }
 
     if (type === 'add-quick-item') {
       const itemName = data.itemName?.trim()

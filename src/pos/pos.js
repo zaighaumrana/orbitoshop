@@ -112,7 +112,6 @@ function render() {
           <div class="top-actions">
             <span class="chip"><strong style="font-size:12px">${SESSION.employee.name}</strong></span>
             <span class="chip"><i class="dot ${state.online?'':'offline'}"></i>${state.online?'Online':'Offline'}</span>
-            ${state.installPrompt?`<button class="icon-button" data-action="install">Install</button>`:''}
             ${(SESSION.isAdmin || SESSION.employee?.role === 'Business Owner') ? `
               <button class="secondary-button" data-action="go-admin">Admin</button>
               ${CFG.technician_module_enabled

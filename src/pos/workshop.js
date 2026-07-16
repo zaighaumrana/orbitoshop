@@ -558,6 +558,9 @@ function attachEvents() {
       const { initAdmin } = await import('../admin/admin.js')
       initAdmin(SESSION, 'dashboard', {}); return
     }
+    if (el.dataset.action === 'install' && state.installPrompt) {
+      state.installPrompt.prompt(); state.installPrompt = null; render(); return
+    }
     if (el.dataset.action === 'my-account') {
       state.modal = { type: 'myAccount' }; render(); return
     }
