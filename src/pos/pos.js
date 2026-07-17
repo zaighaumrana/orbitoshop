@@ -38,11 +38,15 @@ const posState = {
 }
 
 let SESSION = {}
+let _inv = null  // populated via dynamic import only when inventory_module_enabled
 let _eventsAttached = false
 
 /* ── Load ── */
 async function load() {
   await loadConfig()
+  if (CFG.inventory_module_enabled && !_inv) {
+    _inv = await import('../inventory.js')
+  }
   const fetchInv = CFG.inventory_module_enabled
     ? sb.from('inventory').select('*').order('name')
     : Promise.resolve({ data: [] })
@@ -176,7 +180,7 @@ function posView() {
     <div class="grid pos-layout">
       <div class="grid" style="align-content:start;gap:12px">
         ${quickItemsPanel()}
-        ${inventoryPanel()}
+        ${CFG.inventory_module_enabled && _inv ? _inv.inventoryPanel(posState) : ''}
         ${recentRepairPanel()}
       </div>
       <aside class="card cart">
@@ -289,27 +293,7 @@ function customItemEntry() {
     </div>`
 }
 
-function inventoryPanel() {
-  if (!CFG.inventory_module_enabled) return ''
-  const invItems = (state.data.inventory||[]).filter(i=>Number(i.qty||0)>0)
-  if (!invItems.length) return ''
-  const f = (posState.invSearch||'').toLowerCase()
-  const filtered = f ? invItems.filter(i=>(i.name||'').toLowerCase().includes(f)||(i.category||'').toLowerCase().includes(f)) : invItems
-  return `
-    <div class="card">
-      <h2 style="margin-bottom:10px">Stock Items</h2>
-      <input placeholder="Search stock…" value="${posState.invSearch||''}" data-inv-search
-        style="width:100%;margin-bottom:10px;border:1px solid var(--border);border-radius:8px;padding:8px 12px;background:var(--surface);color:var(--text);font-size:14px">
-      <div style="display:flex;flex-wrap:wrap;gap:8px">
-        ${filtered.slice(0,24).map(i=>`
-          <button class="secondary-button" style="font-size:13px;padding:8px 14px;border-radius:8px;text-align:left"
-            data-inv-pos-add="${i.id}" data-inv-pos-name="${i.name}" data-inv-pos-price="${i.price}">
-            <div style="font-weight:600">${i.name}</div>
-            <div style="font-size:11px;color:var(--muted)">${money(i.price)} · ${i.qty} left</div>
-          </button>`).join('')}
-      </div>
-    </div>`
-}
+
 
 /* Main screen — only 3 most recent PENDING (balance_due > 0) tickets */
 function recentRepairPanel() {
@@ -1528,12 +1512,8 @@ function attachEvents() {
     }
 
     /* ── Inventory POS tap ── */
-    if (el.dataset.invPosAdd) {
-      const id=Number(el.dataset.invPosAdd), name=el.dataset.invPosName, price=Number(el.dataset.invPosPrice)
-      const key=`inv-${id}`
-      const ex=posState.cart.find(i=>i.productId===key)
-      if (ex) ex.qty+=1
-      else posState.cart.push({ productId:key, name, qty:1, originalPrice:price, soldPrice:price, discount:0, reason:'', isInventory:true, inventoryId:id })
+    if (el.dataset.invPosAdd && _inv) {
+      _inv.handleInvPosAdd(el, posState)
       render(); return
     }
 
